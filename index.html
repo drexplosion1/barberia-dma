@@ -337,38 +337,18 @@
       <!-- Section Title -->
       <div class="text-center max-w-2xl mx-auto mb-10">
         <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold-500/10 text-gold-400 border border-gold-500/30 text-xs font-bold uppercase tracking-wider mb-3">
-          <span>⚡ Citas Automatizadas Sin Servidores</span>
+          <span>⚡ Reserva de Cita Online</span>
         </div>
-        <h2 class="text-3xl sm:text-4xl font-black font-heading text-white uppercase">Reserva tu Turno en Tiempo Real</h2>
+        <h2 class="text-3xl sm:text-4xl font-black font-heading text-white uppercase">Elige tu Turno en Tiempo Real</h2>
         <p class="text-gray-400 text-sm mt-3">
-          Los turnos se bloquean automáticamente en el calendario para que nadie más pueda elegir tu misma hora.
+          Selecciona tu servicio y la hora que mejor te venga. Los turnos ocupados quedan automáticamente bloqueados.
         </p>
       </div>
 
-      <!-- Tabs Selector: Google Calendar vs WhatsApp -->
-      <div class="flex items-center justify-center mb-8">
-        <div class="bg-brandDark-950 p-1.5 rounded-2xl border border-gray-800 flex items-center gap-1.5 shadow-xl max-w-lg w-full">
-          <button id="tab-btn-google" type="button" class="flex-1 py-2.5 px-4 rounded-xl text-xs uppercase tracking-wider font-bold bg-gold-500 text-black shadow-md transition-all flex items-center justify-center gap-2">
-            <span>📅</span>
-            <span>Huecos en Directo (Google Calendar)</span>
-          </button>
-          <button id="tab-btn-whatsapp" type="button" class="flex-1 py-2.5 px-4 rounded-xl text-xs uppercase tracking-wider font-semibold text-gray-400 hover:text-white transition-all flex items-center justify-center gap-2">
-            <span>💬</span>
-            <span>Vía WhatsApp</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- View 1: Google Calendar Appointment Scheduling (Auto-bloqueo real) -->
-      <div id="booking-view-google" class="transition-all duration-300 mb-6">
-        <div id="google-calendar-container"></div>
-      </div>
-
-      <!-- View 2: Formulario WhatsApp (Alternativa Rápida) -->
-      <div id="booking-view-whatsapp" class="hidden transition-all duration-300">
-        <div class="glass-card rounded-3xl p-6 sm:p-10 border border-gold-500/25 shadow-2xl bg-brandDark-850">
-          
-          <form id="booking-form" class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <!-- Main Booking Container -->
+      <div class="glass-card rounded-3xl p-6 sm:p-10 border border-gold-500/25 shadow-2xl bg-brandDark-850">
+        
+        <form id="booking-form" class="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
           <!-- Columna Izquierda: Selección de Servicio -->
           <div class="lg:col-span-5 space-y-4">
@@ -379,7 +359,7 @@
               <!-- Cargado dinámicamente -->
             </div>
 
-            <!-- Alternative Call Box -->
+            <!-- Contact Box -->
             <div class="pt-4 border-t border-gray-800">
               <a href="tel:+34610245360" class="block p-3.5 rounded-xl bg-gray-800/60 hover:bg-gray-800 border border-gray-700/60 text-xs text-gray-300 transition-colors">
                 <div class="flex items-center justify-between">
@@ -417,9 +397,15 @@
 
             <!-- Selector de Turno / Horas -->
             <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-gold-400 mb-2">
-                3. Selecciona la hora disponible
-              </label>
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-xs font-bold uppercase tracking-wider text-gold-400">
+                  3. Selecciona la hora disponible
+                </label>
+                <div class="flex items-center gap-3 text-[11px] text-gray-400">
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Libre</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> Ocupado</span>
+                </div>
+              </div>
               <div id="time-slots-container" class="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-[160px] overflow-y-auto pr-1">
                 <!-- Horas generadas por JS -->
               </div>
@@ -439,7 +425,7 @@
 
               <div class="sm:col-span-2">
                 <label for="booking-notes" class="block text-xs font-bold text-gray-300 mb-1">Notas o petición especial (Opcional)</label>
-                <input type="text" id="booking-notes" placeholder="Ej. Primera vez, corte clásico a tijera..." class="w-full bg-[#151922] border border-gray-700 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
+                <input type="text" id="booking-notes" placeholder="Ej. Primera vez, corte a tijera o degradado..." class="w-full bg-[#151922] border border-gray-700 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
               </div>
             </div>
 
@@ -450,7 +436,7 @@
                 <span>Confirmar Cita por WhatsApp (+34 610 24 53 60)</span>
               </button>
               <p class="text-[11px] text-gray-500 text-center mt-2">
-                🔒 Sin registros ni tarjetas. Se abre tu WhatsApp con los detalles de tu cita listos para enviar.
+                🔒 Sin registros ni tarjetas. Se abre tu WhatsApp con los detalles de tu turno listos para enviar.
               </p>
             </div>
 
@@ -459,7 +445,14 @@
         </form>
 
       </div>
-    </div>
+
+      <!-- Acceso Barbero Discreto -->
+      <div class="mt-8 text-center">
+        <button type="button" class="btn-open-barber-panel text-xs text-gray-500 hover:text-gold-400 inline-flex items-center gap-1.5 transition-colors py-1.5 px-3 rounded-lg border border-gray-800/80 hover:border-gold-500/40">
+          <span>🔐</span>
+          <span>Acceso Barbero (Bloquear / Liberar Horas)</span>
+        </button>
+      </div>
 
     </div>
   </section>
@@ -707,6 +700,7 @@
         <a href="#reservas" class="hover:text-gold-400">Reservar Cita</a>
         <a href="tel:+34610245360" class="hover:text-gold-400">Tel: 610 24 53 60</a>
         <a href="https://maps.google.com/?q=Barberia+DMA+Oviedo+Ignacio+Herrero+Garralda+1" target="_blank" rel="noopener noreferrer" class="hover:text-gold-400">Cómo llegar</a>
+        <button type="button" class="btn-open-barber-panel hover:text-gold-400 text-gold-500 font-semibold">🔐 Acceso Barbero</button>
       </div>
 
       <div class="text-center md:text-right">
@@ -729,6 +723,83 @@
     <a href="https://maps.google.com/?q=Barberia+DMA+Oviedo+Ignacio+Herrero+Garralda+1" target="_blank" rel="noopener noreferrer" aria-label="Ubicación" class="w-12 h-11 flex items-center justify-center rounded-xl bg-brandDark-800 border border-gray-700 text-gray-300">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
     </a>
+  </div>
+
+  <!-- ==================== MODAL MODO BARBERO (GESTIÓN DE HORAS) ==================== -->
+  <div id="barber-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+    <div class="glass-card bg-[#12151d] border border-gold-500/30 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl relative my-auto">
+      
+      <!-- Close Button -->
+      <button id="btn-close-barber-modal" type="button" class="absolute top-5 right-5 text-gray-400 hover:text-white p-2 rounded-xl bg-gray-800/80 hover:bg-gray-700 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+
+      <!-- SECCIÓN 1: Autenticación con PIN -->
+      <div id="barber-auth-section" class="text-center py-6">
+        <div class="w-14 h-14 rounded-2xl bg-gold-500/10 border border-gold-500/30 flex items-center justify-center text-gold-400 text-3xl mx-auto mb-4">
+          🔐
+        </div>
+        <h3 class="text-2xl font-black font-heading text-white uppercase mb-2">Panel del Barbero</h3>
+        <p class="text-xs text-gray-400 max-w-sm mx-auto mb-6">
+          Introduce tu PIN de 4 dígitos para gestionar y bloquear horas en la web.
+        </p>
+
+        <form id="barber-pin-form" class="max-w-xs mx-auto space-y-4">
+          <input type="password" id="barber-pin-input" maxlength="8" placeholder="Introduce el PIN (defecto: 1234)" class="w-full text-center text-lg tracking-widest bg-brandDark-950 border border-gray-700 focus:border-gold-500 rounded-xl py-3 px-4 text-white focus:outline-none">
+          <button type="submit" class="w-full py-3.5 rounded-xl bg-gold-gradient text-black font-black text-xs uppercase tracking-wider hover:opacity-95 transition-all">
+            Entrar al Panel
+          </button>
+        </form>
+      </div>
+
+      <!-- SECCIÓN 2: Gestión de Horarios y Bloqueos -->
+      <div id="barber-manage-section" class="hidden space-y-6">
+        
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-800">
+          <div>
+            <h3 class="text-xl font-black font-heading text-white uppercase flex items-center gap-2">
+              <span>Agenda de Turnos</span>
+              <span id="admin-current-date-badge" class="text-xs font-normal font-sans py-0.5 px-2 rounded-full bg-gold-500/15 text-gold-400 border border-gold-500/30"></span>
+            </h3>
+            <p class="text-xs text-gray-400">Toca con el dedo cualquier turno para ponerlo <strong class="text-red-400">OCUPADO</strong> o <strong class="text-emerald-400">LIBRE</strong>.</p>
+          </div>
+          
+          <div>
+            <label for="admin-date-picker" class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Cambiar Día:</label>
+            <input type="date" id="admin-date-picker" class="bg-brandDark-950 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-gold-500">
+          </div>
+        </div>
+
+        <!-- Grid de slots interactivos -->
+        <div>
+          <div id="admin-slots-grid" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 max-h-[280px] overflow-y-auto pr-1">
+            <!-- Cargado dinámicamente -->
+          </div>
+        </div>
+
+        <!-- Botones de Acción y Guardado -->
+        <div class="pt-4 border-t border-gray-800 space-y-3">
+          <div class="flex flex-col sm:flex-row items-center gap-3">
+            <button type="button" onclick="guardarCambiosEnGitHub()" class="w-full sm:flex-1 py-3.5 px-5 rounded-xl bg-gold-gradient text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-gold-500/20 hover:scale-105 active:scale-95 transition-all">
+              <svg class="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+              <span>Guardar en GitHub (Sincronizar)</span>
+            </button>
+            <button type="button" onclick="copiarJsonParaGitHub()" class="w-full sm:w-auto py-3.5 px-4 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs border border-gray-700 transition-colors">
+              Copiar Datos
+            </button>
+          </div>
+
+          <div class="flex items-center justify-between text-[11px] text-gray-500 pt-1">
+            <span id="admin-save-status">Los cambios se aplican de inmediato en este dispositivo.</span>
+            <button type="button" onclick="localStorage.removeItem('dma_github_token'); alert('Token eliminado. Se te pedirá de nuevo al guardar.');" class="text-gray-500 hover:text-gold-400 underline">
+              Cambiar Token de GitHub
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
   </div>
 
   <!-- Scripts -->

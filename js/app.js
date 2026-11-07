@@ -1,17 +1,16 @@
 /**
  * Barbería DMA - Oviedo
- * Motor interactivo de citas (Zero Server), estado de apertura y utilidades.
+ * Motor interactivo de citas (Zero Server con GitHub como Base de Datos)
  */
 
-// Configuración general del negocio
 const BARBERIA_CONFIG = {
   nombre: "Barbería DMA",
   telefono: "+34610245360",
   telefonoLimpio: "34610245360",
   direccion: "C. Ignacio Herrero Garralda, 1, 33011 Oviedo, Asturias",
   googleMapsUrl: "https://maps.google.com/?q=Barberia+DMA+Oviedo+Ignacio+Herrero+Garralda+1",
-  // Pega aquí tu enlace de "Página de citas" de Google Calendar (ej: https://calendar.google.com/calendar/appointments/schedules/AcZssZ...)
-  googleCalendarBookingUrl: "",
+  githubRepo: "drexplosion1/barberia-dma",
+  pinBarberoPorDefecto: "1234",
   horarios: {
     semana: [
       { inicio: "10:30", fin: "13:30" },
@@ -74,7 +73,14 @@ const BARBERIA_CONFIG = {
   ]
 };
 
-// Estado del formulario de reserva
+// Base de datos de bloqueos (cargada desde data/bloqueos.json o localStorage)
+let DB_BLOQUEOS = {
+  bloqueos: {}, // {"2026-11-10": ["11:30", "16:00"]}
+  citas: []
+};
+let DB_FILE_SHA = null;
+
+// Estado del formulario de reserva del cliente
 let reservaState = {
   servicioSeleccionado: BARBERIA_CONFIG.servicios[0],
   fecha: "",
@@ -84,149 +90,37 @@ let reservaState = {
   notas: ""
 };
 
-// Document Ready
-document.addEventListener("DOMContentLoaded", () => {
+// Estado del Panel Barbero
+let adminState = {
+  autenticado: false,
+  fechaSeleccionada: "",
+  githubToken: localStorage.getItem("dma_github_token") || "",
+  pinGuardado: localStorage.getItem("dma_admin_pin") || BARBERIA_CONFIG.pinBarberoPorDefecto
+};
+
+// Inicialización
+document.addEventListener("DOMContentLoaded", async () => {
   actualizarEstadoApertura();
-  setInterval(actualizarEstadoApertura, 60000); // recalcular cada minuto
+  setInterval(actualizarEstadoApertura, 60000);
 
   initServiciosUI();
+  await cargarBloqueosDesdeGitHub();
   initCalendarioUI();
   initFormularioReserva();
-  initGoogleCalendarEmbed();
-  initBookingTabs();
+  initPanelBarbero();
   initMobileMenu();
   initFaqAccordion();
 });
 
 /* ============================================================
-   GOOGLE CALENDAR APPOINTMENT SCHEDULING (AUTO-BLOQUEO)
-   ============================================================ */
-function initBookingTabs() {
-  const tabGoogle = document.getElementById("tab-btn-google");
-  const tabWhatsapp = document.getElementById("tab-btn-whatsapp");
-  const viewGoogle = document.getElementById("booking-view-google");
-  const viewWhatsapp = document.getElementById("booking-view-whatsapp");
-
-  if (!tabGoogle || !tabWhatsapp || !viewGoogle || !viewWhatsapp) return;
-
-  tabGoogle.addEventListener("click", () => {
-    tabGoogle.classList.add("bg-gold-500", "text-black", "font-bold");
-    tabGoogle.classList.remove("text-gray-400", "hover:text-white");
-    tabWhatsapp.classList.remove("bg-gold-500", "text-black", "font-bold");
-    tabWhatsapp.classList.add("text-gray-400", "hover:text-white");
-
-    viewGoogle.classList.remove("hidden");
-    viewWhatsapp.classList.add("hidden");
-  });
-
-  tabWhatsapp.addEventListener("click", () => {
-    tabWhatsapp.classList.add("bg-gold-500", "text-black", "font-bold");
-    tabWhatsapp.classList.remove("text-gray-400", "hover:text-white");
-    tabGoogle.classList.remove("bg-gold-500", "text-black", "font-bold");
-    tabGoogle.classList.add("text-gray-400", "hover:text-white");
-
-    viewWhatsapp.classList.remove("hidden");
-    viewGoogle.classList.add("hidden");
-  });
-}
-
-function initGoogleCalendarEmbed() {
-  const container = document.getElementById("google-calendar-container");
-  if (!container) return;
-
-  // Si el usuario configuró una URL en BARBERIA_CONFIG o guardó una en localStorage
-  const savedUrl = localStorage.getItem("barberia_dma_gcal_url") || BARBERIA_CONFIG.googleCalendarBookingUrl;
-
-  if (savedUrl && savedUrl.trim().length > 0) {
-    let cleanUrl = savedUrl.trim();
-    if (!cleanUrl.includes("gv=true")) {
-      cleanUrl += cleanUrl.includes("?") ? "&gv=true" : "?gv=true";
-    }
-    container.innerHTML = `
-      <div class="w-full bg-[#151922] rounded-2xl overflow-hidden border border-gold-500/30 shadow-2xl relative min-h-[650px]">
-        <div class="p-3 bg-brandDark-900 border-b border-gray-800 flex items-center justify-between text-xs">
-          <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span class="text-white font-semibold">Calendario Oficial Sincronizado en Tiempo Real</span>
-          </div>
-          <button onclick="cambiarEnlaceGoogleCalendar()" class="text-gray-400 hover:text-gold-400 text-[11px] underline">
-            Cambiar enlace
-          </button>
-        </div>
-        <iframe src="${cleanUrl}" width="100%" height="650" frameborder="0" class="w-full h-[650px] bg-white rounded-b-2xl" title="Página de citas Google Calendar Barbería DMA"></iframe>
-      </div>
-    `;
-  } else {
-    // Pantalla informativa de activación sencilla en 2 pasos
-    container.innerHTML = `
-      <div class="glass-card rounded-2xl p-6 sm:p-8 border border-gold-500/30 text-center max-w-2xl mx-auto">
-        <div class="w-14 h-14 rounded-2xl bg-gold-500/10 border border-gold-500/30 flex items-center justify-center text-gold-400 text-3xl mx-auto mb-4">
-          📅
-        </div>
-        <h3 class="text-xl font-bold font-heading text-white uppercase mb-2">
-          Páginas de Citas de Google Calendar (Auto-Bloqueo de Huecos)
-        </h3>
-        <p class="text-xs sm:text-sm text-gray-300 leading-relaxed mb-6">
-          Google Calendar incluye un sistema oficial y 100% gratuito de <strong>Programación de Citas</strong>. Cuando un cliente reserva un turno, <strong>el hueco desaparece automáticamente</strong> y te avisa a tu teléfono móvil.
-        </p>
-
-        <div class="text-left bg-brandDark-950 p-4 sm:p-5 rounded-xl border border-gray-800 space-y-3 mb-6 text-xs text-gray-300">
-          <p class="font-bold text-gold-400 uppercase text-[11px] tracking-wider">Pasos para activarlo en 2 minutos:</p>
-          <div class="flex items-start gap-2.5">
-            <span class="w-5 h-5 rounded-full bg-gold-500/20 text-gold-400 flex items-center justify-center font-bold shrink-0">1</span>
-            <span>Abre <a href="https://calendar.google.com" target="_blank" rel="noopener" class="text-gold-400 underline font-semibold">Google Calendar</a> en tu ordenador o móvil con tu cuenta de Google.</span>
-          </div>
-          <div class="flex items-start gap-2.5">
-            <span class="w-5 h-5 rounded-full bg-gold-500/20 text-gold-400 flex items-center justify-center font-bold shrink-0">2</span>
-            <span>Pulsa el botón <strong>+ Crear</strong> ➔ Selecciona <strong>"Programación de citas"</strong>.</span>
-          </div>
-          <div class="flex items-start gap-2.5">
-            <span class="w-5 h-5 rounded-full bg-gold-500/20 text-gold-400 flex items-center justify-center font-bold shrink-0">3</span>
-            <span>Ajusta tu horario (L-V 10:30-13:30 / 15:00-20:00, Sáb 10:00-14:00) y pulsa <strong>Compartir</strong> para copiar tu enlace.</span>
-          </div>
-        </div>
-
-        <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
-          <button onclick="pedirEnlaceGoogleCalendar()" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-gold-gradient text-black font-extrabold text-xs uppercase tracking-wider hover:scale-105 active:scale-95 transition-all">
-            Pegar mi enlace de Google Calendar
-          </button>
-          <a href="https://calendar.google.com" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto px-5 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs border border-gray-700 transition-colors">
-            Abrir Google Calendar ↗
-          </a>
-        </div>
-      </div>
-    `;
-  }
-}
-
-function pedirEnlaceGoogleCalendar() {
-  const url = prompt(
-    "Pega el enlace de tu 'Página de citas' de Google Calendar:\n(Ej: https://calendar.google.com/calendar/appointments/schedules/...)"
-  );
-  if (url && url.trim().length > 0) {
-    localStorage.setItem("barberia_dma_gcal_url", url.trim());
-    initGoogleCalendarEmbed();
-  }
-}
-
-function cambiarEnlaceGoogleCalendar() {
-  if (confirm("¿Quieres cambiar o actualizar el enlace de Google Calendar?")) {
-    localStorage.removeItem("barberia_dma_gcal_url");
-    initGoogleCalendarEmbed();
-  }
-}
-
-/* ============================================================
-   1. ESTADO DE APERTURA EN TIEMPO REAL (HORARIOS DE OVIEDO)
+   1. ESTADO DE APERTURA EN TIEMPO REAL
    ============================================================ */
 function actualizarEstadoApertura() {
   const badgeElement = document.getElementById("status-badge");
-  const textElement = document.getElementById("status-text");
-  if (!badgeElement || !textElement) return;
+  if (!badgeElement) return;
 
   const ahora = new Date();
-  // Formatear a hora local española
-  const diaSemana = ahora.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
+  const diaSemana = ahora.getDay(); // 0 = Dom, 1 = Lun, ..., 6 = Sáb
   const horas = ahora.getHours();
   const minutos = ahora.getMinutes();
   const horaActualDecimal = horas + minutos / 60;
@@ -235,23 +129,19 @@ function actualizarEstadoApertura() {
   let mensajeExtra = "";
 
   if (diaSemana >= 1 && diaSemana <= 5) {
-    // Lunes a Viernes: 10:30 - 13:30 (10.5 a 13.5) y 15:00 - 20:00 (15 a 20)
+    // L-V: 10:30-13:30 y 15:00-20:00
     if ((horaActualDecimal >= 10.5 && horaActualDecimal < 13.5) || (horaActualDecimal >= 15.0 && horaActualDecimal < 20.0)) {
       estaAbierto = true;
-      if (horaActualDecimal < 13.5) {
-        mensajeExtra = "• Cierra a las 13:30 (abre a las 15:00)";
-      } else {
-        mensajeExtra = "• Cierra a las 20:00";
-      }
+      mensajeExtra = horaActualDecimal < 13.5 ? "• Cierra a las 13:30 (reabre 15:00)" : "• Cierra a las 20:00";
     } else if (horaActualDecimal < 10.5) {
       mensajeExtra = "• Abre hoy a las 10:30";
     } else if (horaActualDecimal >= 13.5 && horaActualDecimal < 15.0) {
-      mensajeExtra = "• Pausa mediodía (reabre a las 15:00)";
+      mensajeExtra = "• Pausa mediodía (abre 15:00)";
     } else {
       mensajeExtra = diaSemana === 5 ? "• Abre mañana sábado a las 10:00" : "• Abre mañana a las 10:30";
     }
   } else if (diaSemana === 6) {
-    // Sábado: 10:00 - 14:00 (10 a 14)
+    // Sábado: 10:00 - 14:00
     if (horaActualDecimal >= 10.0 && horaActualDecimal < 14.0) {
       estaAbierto = true;
       mensajeExtra = "• Cierra a las 14:00";
@@ -261,7 +151,6 @@ function actualizarEstadoApertura() {
       mensajeExtra = "• Cerrado hasta el lunes a las 10:30";
     }
   } else {
-    // Domingo
     mensajeExtra = "• Cerrado por descanso (Abre lunes a las 10:30)";
   }
 
@@ -275,10 +164,33 @@ function actualizarEstadoApertura() {
 }
 
 /* ============================================================
-   2. RENDER DE SERVICIOS
+   2. GITHUB COMO BASE DE DATOS (CARGA Y GUARDADO DE BLOQUEOS)
+   ============================================================ */
+async function cargarBloqueosDesdeGitHub() {
+  try {
+    // Intentar leer primero con timestamp para evitar cache
+    const url = `data/bloqueos.json?nocache=${Date.now()}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const datos = await res.json();
+      DB_BLOQUEOS = datos || { bloqueos: {}, citas: [] };
+      localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
+    } else {
+      // Fallback a localStorage
+      const cached = localStorage.getItem("dma_bloqueos_cache");
+      if (cached) DB_BLOQUEOS = JSON.parse(cached);
+    }
+  } catch (err) {
+    console.warn("Aviso al cargar data/bloqueos.json, usando cache local", err);
+    const cached = localStorage.getItem("dma_bloqueos_cache");
+    if (cached) DB_BLOQUEOS = JSON.parse(cached);
+  }
+}
+
+/* ============================================================
+   3. RENDER DE SERVICIOS
    ============================================================ */
 function initServiciosUI() {
-  // Render en la lista de servicios de la web
   const listaServiciosContenedor = document.getElementById("services-grid");
   if (listaServiciosContenedor) {
     listaServiciosContenedor.innerHTML = BARBERIA_CONFIG.servicios.map(s => `
@@ -305,7 +217,6 @@ function initServiciosUI() {
     `).join("");
   }
 
-  // Render en el selector del formulario de reserva
   const bookingServicesContainer = document.getElementById("booking-service-options");
   if (bookingServicesContainer) {
     bookingServicesContainer.innerHTML = BARBERIA_CONFIG.servicios.map((s, idx) => `
@@ -328,9 +239,7 @@ function initServiciosUI() {
 function seleccionarServicioParaReserva(serviceId) {
   setServicioBooking(serviceId);
   const seccion = document.getElementById("reservas");
-  if (seccion) {
-    seccion.scrollIntoView({ behavior: "smooth" });
-  }
+  if (seccion) seccion.scrollIntoView({ behavior: "smooth" });
 }
 
 function setServicioBooking(serviceId) {
@@ -338,7 +247,6 @@ function setServicioBooking(serviceId) {
   if (!encontrado) return;
   reservaState.servicioSeleccionado = encontrado;
 
-  // Actualizar UI de pills
   BARBERIA_CONFIG.servicios.forEach(s => {
     const el = document.getElementById(`booking-item-${s.id}`);
     if (el) {
@@ -358,51 +266,37 @@ function setServicioBooking(serviceId) {
 }
 
 /* ============================================================
-   3. CALENDARIO Y SELECTOR DE HORAS
+   4. CALENDARIO Y HUECOS LIBRES/OCUPADOS DEL CLIENTE
    ============================================================ */
 function initCalendarioUI() {
   const dateInput = document.getElementById("booking-date");
   if (!dateInput) return;
 
-  // Fecha mínima: Hoy
   const hoy = new Date();
-  const anio = hoy.getFullYear();
-  const mes = String(hoy.getMonth() + 1).padStart(2, "0");
-  const dia = String(hoy.getDate()).padStart(2, "0");
-  const fechaMin = `${anio}-${mes}-${dia}`;
+  const fechaMin = formatearFechaISO(hoy);
   dateInput.min = fechaMin;
 
-  // Fecha máxima: 40 días vista
   const maxFechaObj = new Date();
   maxFechaObj.setDate(hoy.getDate() + 40);
-  const maxAnio = maxFechaObj.getFullYear();
-  const maxMes = String(maxFechaObj.getMonth() + 1).padStart(2, "0");
-  const maxDia = String(maxFechaObj.getDate()).padStart(2, "0");
-  dateInput.max = `${maxAnio}-${maxMes}-${maxDia}`;
+  dateInput.max = formatearFechaISO(maxFechaObj);
 
-  // Preseleccionar fecha: Hoy si aún está abierto, o mañana
-  const diaHoySemana = hoy.getDay();
   let fechaInicial = fechaMin;
-  if (diaHoySemana === 0) {
+  if (hoy.getDay() === 0) {
     // Si hoy es domingo, sugerir lunes
     const proxLunes = new Date();
     proxLunes.setDate(hoy.getDate() + 1);
-    const pAnio = proxLunes.getFullYear();
-    const pMes = String(proxLunes.getMonth() + 1).padStart(2, "0");
-    const pDia = String(proxLunes.getDate()).padStart(2, "0");
-    fechaInicial = `${pAnio}-${pMes}-${pDia}`;
+    fechaInicial = formatearFechaISO(proxLunes);
   }
 
   dateInput.value = fechaInicial;
   reservaState.fecha = fechaInicial;
 
-  generarHuecosHorarios(fechaInicial);
+  generarHuecosHorariosCliente(fechaInicial);
 
   dateInput.addEventListener("change", (e) => {
     const valor = e.target.value;
     if (!valor) return;
 
-    // Verificar si seleccionó domingo
     const seleccion = new Date(valor + "T12:00:00");
     if (seleccion.getDay() === 0) {
       alert("⚠️ Los domingos estamos cerrados por descanso. Por favor, selecciona un día de lunes a sábado.");
@@ -416,62 +310,92 @@ function initCalendarioUI() {
 
     reservaState.fecha = valor;
     reservaState.hora = "";
-    generarHuecosHorarios(valor);
+    generarHuecosHorariosCliente(valor);
     actualizarResumenReserva();
   });
 }
 
-function generarHuecosHorarios(fechaString) {
+function generarHuecosHorariosCliente(fechaString) {
   const container = document.getElementById("time-slots-container");
   if (!container) return;
 
   const fechaObj = new Date(fechaString + "T12:00:00");
   const diaSemana = fechaObj.getDay();
 
-  let slots = [];
+  let slotsBase = [];
   if (diaSemana >= 1 && diaSemana <= 5) {
-    // Lunes a Viernes
-    slots = [
+    // L-V
+    slotsBase = [
       "10:30", "11:00", "11:30", "12:00", "12:30", "13:00",
       "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30"
     ];
   } else if (diaSemana === 6) {
     // Sábado
-    slots = [
+    slotsBase = [
       "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30"
     ];
   } else {
-    // Domingo
     container.innerHTML = `<p class="text-xs text-amber-400 col-span-full py-2">Cerrado los domingos.</p>`;
     return;
   }
 
-  // Si la fecha seleccionada es hoy, descartar horas pasadas
+  // Comprobar qué horas están bloqueadas por el barbero
+  const bloqueadosDelDia = (DB_BLOQUEOS.bloqueos && DB_BLOQUEOS.bloqueos[fechaString]) || [];
+
+  // Filtrar horas ya pasadas si la fecha es hoy
+  const hoyStr = formatearFechaISO(new Date());
   const ahora = new Date();
-  const hoyStr = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}-${String(ahora.getDate()).padStart(2, "0")}`;
-  
-  if (fechaString === hoyStr) {
-    const horaActual = ahora.getHours();
-    const minActual = ahora.getMinutes();
-    slots = slots.filter(s => {
+  const horaActual = ahora.getHours();
+  const minActual = ahora.getMinutes();
+
+  let primerHuecoDisponible = null;
+
+  container.innerHTML = slotsBase.map((s) => {
+    let esPasada = false;
+    if (fechaString === hoyStr) {
       const [h, m] = s.split(":").map(Number);
-      return (h > horaActual) || (h === horaActual && m > minActual + 15);
-    });
+      if (h < horaActual || (h === horaActual && m <= minActual + 15)) {
+        esPasada = true;
+      }
+    }
+
+    const estaBloqueada = bloqueadosDelDia.includes(s);
+
+    if (esPasada) {
+      return `
+        <button type="button" disabled class="py-2 px-1 text-center rounded-lg border border-gray-800 text-[11px] text-gray-600 bg-[#0d0f14] cursor-not-allowed opacity-50" title="Hora ya pasada">
+          <span>${s}</span>
+          <span class="block text-[8px] text-gray-600">Pasada</span>
+        </button>
+      `;
+    }
+
+    if (estaBloqueada) {
+      return `
+        <button type="button" disabled class="py-2 px-1 text-center rounded-lg border border-red-500/20 text-[11px] text-red-400/60 bg-red-950/20 cursor-not-allowed line-through" title="Hora ocupada por otro cliente">
+          <span>${s}</span>
+          <span class="block text-[8px] text-red-400/80 uppercase font-semibold">Ocupado</span>
+        </button>
+      `;
+    }
+
+    // Libre y disponible
+    if (!primerHuecoDisponible) primerHuecoDisponible = s;
+
+    return `
+      <button type="button" onclick="setSlotHora('${s}')" class="time-slot-btn py-2 px-1 text-center rounded-lg border border-gray-700/80 text-xs text-gray-200 hover:border-amber-400 hover:text-white bg-[#151922] transition-colors" data-slot="${s}">
+        <span>${s}</span>
+        <span class="block text-[8px] text-emerald-400 font-semibold">Libre</span>
+      </button>
+    `;
+  }).join("");
+
+  if (primerHuecoDisponible) {
+    setSlotHora(primerHuecoDisponible);
+  } else {
+    reservaState.hora = "";
+    actualizarResumenReserva();
   }
-
-  if (slots.length === 0) {
-    container.innerHTML = `<p class="text-xs text-gray-400 col-span-full py-4 text-center">No quedan turnos disponibles para hoy. ¡Por favor selecciona otra fecha!</p>`;
-    return;
-  }
-
-  container.innerHTML = slots.map((s, idx) => `
-    <button type="button" onclick="setSlotHora('${s}')" class="time-slot-btn py-2 px-1 text-center rounded-lg border border-gray-700/80 text-xs text-gray-300 hover:border-amber-400 hover:text-white bg-[#151922] transition-colors" data-slot="${s}">
-      ${s}
-    </button>
-  `).join("");
-
-  // Preseleccionar el primer turno disponible
-  setSlotHora(slots[0]);
 }
 
 function setSlotHora(slot) {
@@ -488,9 +412,6 @@ function setSlotHora(slot) {
   actualizarResumenReserva();
 }
 
-/* ============================================================
-   4. FORMULARIO Y CONFIRMACIÓN POR WHATSAPP
-   ============================================================ */
 function initFormularioReserva() {
   const nombreInput = document.getElementById("booking-name");
   const telInput = document.getElementById("booking-phone");
@@ -539,7 +460,7 @@ function actualizarResumenReserva() {
       const fechaFormateada = fObj.toLocaleDateString('es-ES', opciones);
       fechaEl.textContent = `${fechaFormateada} a las ${reservaState.hora}`;
     } else if (reservaState.fecha) {
-      fechaEl.textContent = `${reservaState.fecha} (Selecciona hora)`;
+      fechaEl.textContent = `${reservaState.fecha} (Elige turno libre)`;
     } else {
       fechaEl.textContent = "Elige fecha y hora";
     }
@@ -556,7 +477,7 @@ function confirmarReservaWhatsApp() {
     return;
   }
   if (!reservaState.fecha || !reservaState.hora) {
-    alert("Por favor selecciona la fecha y la hora deseada.");
+    alert("Por favor selecciona la fecha y una hora libre disponible.");
     return;
   }
   if (!reservaState.nombre) {
@@ -566,35 +487,264 @@ function confirmarReservaWhatsApp() {
     return;
   }
 
-  // Formato legible de fecha en español
   const partes = reservaState.fecha.split("-");
   const fObj = new Date(partes[0], partes[1] - 1, partes[2]);
   const opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   const fechaCompleta = fObj.toLocaleDateString('es-ES', opciones);
 
-  // Redactar mensaje estructurado
   let mensaje = `💈 *SOLICITUD DE CITA - BARBERÍA DMA*\n\n`;
-  mensaje += `👋 ¡Hola! Me gustaría solicitar una cita:\n\n`;
+  mensaje += `👋 ¡Hola! Me gustaría reservar cita:\n\n`;
   mensaje += `✂️ *Servicio:* ${reservaState.servicioSeleccionado.nombre} (${reservaState.servicioSeleccionado.precio})\n`;
   mensaje += `📅 *Fecha:* ${fechaCompleta}\n`;
-  mensaje += `⏰ *Hora preferida:* ${reservaState.hora}\n`;
-  mensaje += `👤 *A nombre de:* ${reservaState.nombre}\n`;
+  mensaje += `⏰ *Hora:* ${reservaState.hora}\n`;
+  mensaje += `👤 *Nombre:* ${reservaState.nombre}\n`;
   if (reservaState.telefono) {
     mensaje += `📞 *Teléfono:* ${reservaState.telefono}\n`;
   }
   if (reservaState.notas) {
-    mensaje += `💬 *Comentarios:* ${reservaState.notas}\n`;
+    mensaje += `💬 *Notas:* ${reservaState.notas}\n`;
   }
-  mensaje += `\n¿Tenéis disponibilidad para confirmar? ¡Muchas gracias!`;
+  mensaje += `\n¿Me confirmáis que os viene bien? ¡Gracias!`;
 
-  // Abrir WhatsApp Web o App directamente
   const whatsappUrl = `https://wa.me/${BARBERIA_CONFIG.telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
   window.open(whatsappUrl, '_blank');
 }
 
 /* ============================================================
-   5. MENU MOVIL Y UTILIDADES
+   5. PANEL DEL BARBERO: BLOQUEO DIRECTO DE HUECOS CON 1 CLIC
    ============================================================ */
+function initPanelBarbero() {
+  const modal = document.getElementById("barber-modal");
+  const openBtns = document.querySelectorAll(".btn-open-barber-panel");
+  const closeBtn = document.getElementById("btn-close-barber-modal");
+  const pinForm = document.getElementById("barber-pin-form");
+  const pinInput = document.getElementById("barber-pin-input");
+  const authSection = document.getElementById("barber-auth-section");
+  const manageSection = document.getElementById("barber-manage-section");
+  const adminDateInput = document.getElementById("admin-date-picker");
+
+  if (!modal) return;
+
+  openBtns.forEach(b => {
+    b.addEventListener("click", () => {
+      modal.classList.remove("hidden");
+      if (adminState.autenticado) {
+        authSection.classList.add("hidden");
+        manageSection.classList.remove("hidden");
+        renderizarHorariosAdmin();
+      } else {
+        authSection.classList.remove("hidden");
+        manageSection.classList.add("hidden");
+        if (pinInput) {
+          pinInput.value = "";
+          pinInput.focus();
+        }
+      }
+    });
+  });
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      modal.classList.add("hidden");
+    });
+  }
+
+  // Validación de PIN
+  if (pinForm) {
+    pinForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const pin = pinInput.value.trim();
+      if (pin === adminState.pinGuardado || pin === "1234") {
+        adminState.autenticado = true;
+        authSection.classList.add("hidden");
+        manageSection.classList.remove("hidden");
+
+        const hoy = new Date();
+        adminState.fechaSeleccionada = formatearFechaISO(hoy);
+        if (adminDateInput) adminDateInput.value = adminState.fechaSeleccionada;
+
+        renderizarHorariosAdmin();
+      } else {
+        alert("❌ PIN incorrecto. (El PIN por defecto es 1234)");
+      }
+    });
+  }
+
+  if (adminDateInput) {
+    adminDateInput.addEventListener("change", (e) => {
+      adminState.fechaSeleccionada = e.target.value;
+      renderizarHorariosAdmin();
+    });
+  }
+}
+
+function renderizarHorariosAdmin() {
+  const container = document.getElementById("admin-slots-grid");
+  const fechaBadge = document.getElementById("admin-current-date-badge");
+  if (!container) return;
+
+  const fecha = adminState.fechaSeleccionada || formatearFechaISO(new Date());
+  if (fechaBadge) {
+    fechaBadge.textContent = fecha;
+  }
+
+  const fObj = new Date(fecha + "T12:00:00");
+  const diaSemana = fObj.getDay();
+
+  let slots = [];
+  if (diaSemana >= 1 && diaSemana <= 5) {
+    slots = [
+      "10:30", "11:00", "11:30", "12:00", "12:30", "13:00",
+      "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30"
+    ];
+  } else if (diaSemana === 6) {
+    slots = ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30"];
+  } else {
+    container.innerHTML = `<p class="col-span-full py-4 text-center text-xs text-amber-400">Domingo: día de descanso cerrado.</p>`;
+    return;
+  }
+
+  const bloqueados = (DB_BLOQUEOS.bloqueos && DB_BLOQUEOS.bloqueos[fecha]) || [];
+
+  container.innerHTML = slots.map(s => {
+    const isBlocked = bloqueados.includes(s);
+    return `
+      <button type="button" onclick="toggleBloqueoAdmin('${fecha}', '${s}')" class="p-3 rounded-xl border text-center font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${isBlocked ? 'bg-red-950/40 border-red-500/60 text-red-300' : 'bg-emerald-950/40 border-emerald-500/60 text-emerald-300 hover:scale-105'}">
+        <span class="text-sm">${s}</span>
+        <span class="text-[9px] uppercase tracking-wider py-0.5 px-2 rounded-full ${isBlocked ? 'bg-red-500 text-black font-extrabold' : 'bg-emerald-500/20 text-emerald-400'}">
+          ${isBlocked ? '🔴 Ocupada' : '🟢 Libre'}
+        </span>
+      </button>
+    `;
+  }).join("");
+}
+
+function toggleBloqueoAdmin(fecha, hora) {
+  if (!DB_BLOQUEOS.bloqueos) DB_BLOQUEOS.bloqueos = {};
+  if (!DB_BLOQUEOS.bloqueos[fecha]) DB_BLOQUEOS.bloqueos[fecha] = [];
+
+  const index = DB_BLOQUEOS.bloqueos[fecha].indexOf(hora);
+  if (index > -1) {
+    // Desbloquear
+    DB_BLOQUEOS.bloqueos[fecha].splice(index, 1);
+    if (DB_BLOQUEOS.bloqueos[fecha].length === 0) {
+      delete DB_BLOQUEOS.bloqueos[fecha];
+    }
+  } else {
+    // Bloquear
+    DB_BLOQUEOS.bloqueos[fecha].push(hora);
+  }
+
+  // Guardar en cache local de inmediato
+  localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
+
+  // Refrescar vistas
+  renderizarHorariosAdmin();
+  if (reservaState.fecha) {
+    generarHuecosHorariosCliente(reservaState.fecha);
+  }
+}
+
+// Guardar en GitHub (Commit automático a data/bloqueos.json)
+async function guardarCambiosEnGitHub() {
+  const token = adminState.githubToken || localStorage.getItem("dma_github_token");
+  const statusEl = document.getElementById("admin-save-status");
+
+  if (!token) {
+    const nuevoToken = prompt(
+      "Para sincronizar con GitHub automáticamente, pega tu GitHub Personal Access Token:\n(Si aún no tienes uno, puedes generarlo gratis en github.com/settings/tokens o usar el botón de abajo para copiar el archivo)"
+    );
+    if (nuevoToken && nuevoToken.trim().length > 0) {
+      adminState.githubToken = nuevoToken.trim();
+      localStorage.setItem("dma_github_token", adminState.githubToken);
+    } else {
+      return;
+    }
+  }
+
+  if (statusEl) {
+    statusEl.textContent = "⏳ Guardando en GitHub...";
+    statusEl.className = "text-xs text-amber-400 font-semibold";
+  }
+
+  try {
+    const repo = BARBERIA_CONFIG.githubRepo;
+    const path = "data/bloqueos.json";
+    const apiUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+
+    // Obtener SHA actual del archivo
+    let sha = DB_FILE_SHA;
+    const getRes = await fetch(apiUrl, {
+      headers: {
+        "Authorization": `Bearer ${adminState.githubToken}`,
+        "Accept": "application/vnd.github.v3+json"
+      }
+    });
+
+    if (getRes.ok) {
+      const fileData = await getRes.json();
+      sha = fileData.sha;
+    }
+
+    const jsonContent = JSON.stringify(DB_BLOQUEOS, null, 2);
+    // Codificar a base64 UTF-8 compatible
+    const contentBase64 = btoa(unescape(encodeURIComponent(jsonContent)));
+
+    const putRes = await fetch(apiUrl, {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${adminState.githubToken}`,
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message: "Actualización de horas bloqueadas - Barbería DMA",
+        content: contentBase64,
+        sha: sha || undefined
+      })
+    });
+
+    if (putRes.ok) {
+      const dataResp = await putRes.json();
+      DB_FILE_SHA = dataResp.content.sha;
+      if (statusEl) {
+        statusEl.textContent = "✅ ¡Guardado con éxito en GitHub!";
+        statusEl.className = "text-xs text-emerald-400 font-bold";
+      }
+      alert("✅ ¡Horas actualizadas y guardadas en GitHub! Los clientes ya verán esos huecos bloqueados.");
+    } else {
+      const errData = await putRes.json();
+      throw new Error(errData.message || "Error al subir a GitHub");
+    }
+  } catch (err) {
+    console.error("Error al guardar en GitHub:", err);
+    if (statusEl) {
+      statusEl.textContent = "⚠️ Guardado solo en este teléfono (Revisa el Token de GitHub)";
+      statusEl.className = "text-xs text-amber-400";
+    }
+    alert(`Nota: Los cambios quedan guardados en este dispositivo. Para sincronizarlo globalmente a todos los clientes, revisa tu Token de GitHub o sube el archivo data/bloqueos.json.`);
+  }
+}
+
+function copiarJsonParaGitHub() {
+  const jsonContent = JSON.stringify(DB_BLOQUEOS, null, 2);
+  navigator.clipboard.writeText(jsonContent).then(() => {
+    alert("📋 Contenido de bloqueos copiado al portapapeles. Puedes pegarlo en GitHub en el archivo data/bloqueos.json");
+  }).catch(() => {
+    prompt("Copia este texto y pégalo en data/bloqueos.json en GitHub:", jsonContent);
+  });
+}
+
+/* ============================================================
+   UTILIDADES
+   ============================================================ */
+function formatearFechaISO(d) {
+  const a = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${a}-${m}-${dia}`;
+}
+
 function initMobileMenu() {
   const menuBtn = document.getElementById("mobile-menu-btn");
   const menuNav = document.getElementById("mobile-menu-drawer");
@@ -603,17 +753,12 @@ function initMobileMenu() {
 
   if (!menuBtn || !menuNav) return;
 
-  const toggle = () => {
-    menuNav.classList.toggle("hidden");
-  };
-
+  const toggle = () => menuNav.classList.toggle("hidden");
   menuBtn.addEventListener("click", toggle);
   if (closeBtn) closeBtn.addEventListener("click", toggle);
 
   links.forEach(l => {
-    l.addEventListener("click", () => {
-      menuNav.classList.add("hidden");
-    });
+    l.addEventListener("click", () => menuNav.classList.add("hidden"));
   });
 }
 
@@ -627,7 +772,6 @@ function initFaqAccordion() {
 
       if (targetContent) {
         const isHidden = targetContent.classList.contains("hidden");
-        // Cerrar otros
         document.querySelectorAll(".faq-content").forEach(c => c.classList.add("hidden"));
         document.querySelectorAll(".faq-icon").forEach(i => i.classList.remove("rotate-180"));
 

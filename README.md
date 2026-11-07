@@ -57,7 +57,7 @@ Luego abre en tu navegador: `http://localhost:8000`
    git add .
    git commit -m "Web oficial y sistema de reservas Barberia DMA"
    git branch -M main
-   git remote add origin https://github.com/TU_USUARIO/barberia-dma.git
+   git remote add origin https://github.com/drexplosion1/barberia-dma.git
    git push -u origin main
    ```
 
@@ -66,7 +66,7 @@ Luego abre en tu navegador: `http://localhost:8000`
    - En **Build and deployment > Source**, selecciona **Deploy from a branch**.
    - En **Branch**, selecciona `main` y la carpeta `/(root)`, y haz clic en **Save**.
    - En unos segundos tendrás tu web funcionando en:  
-     `https://TU_USUARIO.github.io/barberia-dma/` (o con tu propio dominio `.es` o `.com` si lo deseas más adelante).
+     `https://drexplosion1.github.io/barberia-dma/` (o con tu propio dominio `.es` o `.com` si lo deseas más adelante).
 
 ---
 

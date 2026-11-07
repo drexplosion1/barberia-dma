@@ -1,0 +1,149 @@
+/* ============================================================
+   Barbería DMA - Oviedo | Custom Styles
+   Paleta: Dark Charcoal, Vintage Gold, Amber, Bone White
+   ============================================================ */
+
+:root {
+  --color-gold: #cfa856;
+  --color-gold-light: #e5c378;
+  --color-gold-dark: #9e7b32;
+  --color-bg-dark: #0c0e12;
+  --color-card-dark: #14171f;
+  --color-border-dark: #232834;
+}
+
+/* Base & Typography */
+html {
+  scroll-behavior: smooth;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+
+.font-heading {
+  font-family: 'Oswald', sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.font-serif-vintage {
+  font-family: 'Playfair Display', serif;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0c0e12;
+}
+::-webkit-scrollbar-thumb {
+  background: #272d3b;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cfa856;
+}
+
+/* Gold Gradient Accents */
+.text-gold-gradient {
+  background: linear-gradient(135deg, #f5d78e 0%, #cfa856 50%, #9e7b32 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.bg-gold-gradient {
+  background: linear-gradient(135deg, #e5c378 0%, #cfa856 50%, #b28a38 100%);
+}
+
+.bg-gold-gradient:hover {
+  background: linear-gradient(135deg, #f0d08b 0%, #dab462 50%, #be9440 100%);
+}
+
+/* Glassmorphism */
+.glass-header {
+  background: rgba(12, 14, 18, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-card {
+  background: rgba(20, 23, 31, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(207, 168, 86, 0.15);
+}
+
+.glass-card:hover {
+  border-color: rgba(207, 168, 86, 0.4);
+  box-shadow: 0 10px 30px -10px rgba(207, 168, 86, 0.15);
+}
+
+/* Barber Pole Animated Border / Glow */
+.barber-pole-border {
+  position: relative;
+}
+.barber-pole-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(45deg, #cfa856, transparent 60%, #cfa856);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Interactive Booking Component */
+.service-pill {
+  transition: all 0.2s ease-in-out;
+  cursor: pointer;
+}
+.service-pill.active {
+  background: rgba(207, 168, 86, 0.15);
+  border-color: #cfa856;
+  color: #fff;
+}
+.service-pill.active .check-icon {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.time-slot-btn {
+  transition: all 0.2s ease;
+}
+.time-slot-btn.active {
+  background: #cfa856;
+  color: #0c0e12;
+  font-weight: 700;
+  border-color: #cfa856;
+  box-shadow: 0 0 15px rgba(207, 168, 86, 0.4);
+}
+
+/* Pulse animation for Open status */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+}
+.pulse-indicator {
+  animation: pulse-soft 2s infinite ease-in-out;
+}
+
+/* Smooth Accordion */
+.faq-answer {
+  transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+}
+
+/* Mobile Sticky Bottom Bar */
+@media (max-width: 768px) {
+  body {
+    padding-bottom: 70px;
+  }
+}

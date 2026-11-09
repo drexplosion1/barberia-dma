@@ -581,7 +581,7 @@ function actualizarResumenReserva() {
   }
 }
 
-function confirmarReservaWhatsApp() {
+async function confirmarReservaWhatsApp() {
   if (!reservaState.servicioSeleccionado) return alert("Por favor selecciona un servicio.");
   if (!reservaState.fecha || !reservaState.hora) return alert("Por favor selecciona la fecha y una hora libre disponible.");
   if (!reservaState.nombre) {
@@ -594,6 +594,54 @@ function confirmarReservaWhatsApp() {
   const fObj = new Date(partes[0], partes[1] - 1, partes[2]);
   const opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   const fechaCompleta = fObj.toLocaleDateString('es-ES', opciones);
+
+  // 1. Guardar automáticamente la cita en memoria y Firebase
+  const docId = `${reservaState.fecha}_${reservaState.hora.replace(':', '')}`;
+  const citaCliente = {
+    fecha: reservaState.fecha,
+    hora: reservaState.hora,
+    nombre: reservaState.nombre.trim(),
+    telefono: (reservaState.telefono || "").trim(),
+    servicio: reservaState.servicioSeleccionado.nombre,
+    precio: reservaState.servicioSeleccionado.precio || "",
+    notas: (reservaState.notas || "").trim(),
+    estado: "pendiente",
+    origen: "whatsapp_web",
+    creadoEn: new Date().toISOString()
+  };
+
+  // Guardar en array local
+  const cIdx = DB_CITAS.findIndex(c => c.id === docId || (c.fecha === citaCliente.fecha && c.hora === citaCliente.hora));
+  if (cIdx > -1) {
+    DB_CITAS[cIdx] = { id: docId, ...citaCliente };
+  } else {
+    DB_CITAS.push({ id: docId, ...citaCliente });
+  }
+  localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
+
+  // Bloquear turno
+  if (!DB_BLOQUEOS.bloqueos[reservaState.fecha]) {
+    DB_BLOQUEOS.bloqueos[reservaState.fecha] = [];
+  }
+  if (!DB_BLOQUEOS.bloqueos[reservaState.fecha].includes(reservaState.hora)) {
+    DB_BLOQUEOS.bloqueos[reservaState.fecha].push(reservaState.hora);
+  }
+  localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
+
+  // Guardar en Firestore en tiempo real
+  if (firebaseDb) {
+    try {
+      await firebaseDb.collection("citas").doc(docId).set(citaCliente);
+      await firebaseDb.collection("bloqueos").doc(reservaState.fecha).set({
+        horas: DB_BLOQUEOS.bloqueos[reservaState.fecha]
+      });
+    } catch (err) {
+      console.warn("Aviso al guardar cita cliente en Firestore:", err);
+    }
+  }
+
+  // Refrescar los turnos para que no se pueda volver a pedir
+  generarHuecosHorariosCliente(reservaState.fecha);
 
   let mensaje = `💈 *SOLICITUD DE CITA - BARBERÍA DMA*\n\n`;
   mensaje += `👋 ¡Hola! Me gustaría reservar cita:\n\n`;
@@ -765,16 +813,52 @@ function initPanelBarbero() {
   }
 }
 
+// Navegación rápida por días estilo libreta
+window.cambiarDiaRelativo = function(delta) {
+  const fechaActual = adminState.fechaSeleccionada || formatearFechaISO(new Date());
+  const [y, m, d] = fechaActual.split('-').map(Number);
+  const fecha = new Date(y, m - 1, d);
+  fecha.setDate(fecha.getDate() + delta);
+  adminState.fechaSeleccionada = formatearFechaISO(fecha);
+  const adminDateInput = document.getElementById("admin-date-picker");
+  if (adminDateInput) adminDateInput.value = adminState.fechaSeleccionada;
+  renderizarHorariosAdmin();
+};
+
+window.irADiaDirecto = function(offsetDias) {
+  const fecha = new Date();
+  fecha.setDate(fecha.getDate() + offsetDias);
+  adminState.fechaSeleccionada = formatearFechaISO(fecha);
+  const adminDateInput = document.getElementById("admin-date-picker");
+  if (adminDateInput) adminDateInput.value = adminState.fechaSeleccionada;
+  renderizarHorariosAdmin();
+};
+
 function renderizarHorariosAdmin() {
   const container = document.getElementById("admin-slots-grid");
   const fechaBadge = document.getElementById("admin-current-date-badge");
+  const titleEl = document.getElementById("admin-notebook-date-title");
+  const adminDateInput = document.getElementById("admin-date-picker");
   if (!container) return;
 
   const fecha = adminState.fechaSeleccionada || formatearFechaISO(new Date());
-  if (fechaBadge) fechaBadge.textContent = fecha;
+  if (adminDateInput) adminDateInput.value = fecha;
 
-  const fObj = new Date(fecha + "T12:00:00");
+  const hoyStr = formatearFechaISO(new Date());
+  const [y, m, d] = fecha.split("-").map(Number);
+  const fObj = new Date(y, m - 1, d);
   const diaSemana = fObj.getDay();
+
+  const opciones = { weekday: 'long', day: 'numeric', month: 'long' };
+  const fechaTxt = fObj.toLocaleDateString('es-ES', opciones);
+  const esHoy = (fecha === hoyStr);
+
+  if (titleEl) {
+    titleEl.textContent = esHoy ? `📅 HOY • ${fechaTxt}` : `📅 ${fechaTxt}`;
+  }
+  if (fechaBadge) {
+    fechaBadge.textContent = fecha;
+  }
 
   let slots = [];
   if (diaSemana >= 1 && diaSemana <= 5) {
@@ -785,7 +869,16 @@ function renderizarHorariosAdmin() {
   } else if (diaSemana === 6) {
     slots = ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30"];
   } else {
-    container.innerHTML = `<p class="col-span-full py-4 text-center text-xs text-amber-400">Domingo: día de descanso cerrado.</p>`;
+    container.innerHTML = `
+      <div class="p-8 text-center bg-brandDark-950 rounded-2xl border border-gray-800 space-y-2">
+        <p class="text-2xl">😴</p>
+        <p class="text-sm font-bold text-white uppercase">Domingo - Cerrado</p>
+        <p class="text-xs text-gray-400">Día de descanso semanal en Barbería DMA.</p>
+        <button type="button" onclick="cambiarDiaRelativo(1)" class="mt-2 px-4 py-2 rounded-xl bg-gold-gradient text-black font-bold text-xs uppercase">
+          Ver Lunes Siguiente ▶
+        </button>
+      </div>
+    `;
     return;
   }
 
@@ -793,21 +886,60 @@ function renderizarHorariosAdmin() {
 
   container.innerHTML = slots.map(s => {
     const isBlocked = bloqueados.includes(s);
-    // Buscar si hay cita asignada
     const cita = DB_CITAS.find(c => c.fecha === fecha && c.hora === s);
-    const nombreCliente = cita && cita.nombre ? cita.nombre : (isBlocked ? "Ocupado" : "Libre");
+    const nombreCliente = (cita && cita.nombre) ? cita.nombre : (isBlocked ? "Bloqueado por Barbero" : "");
+    const estado = cita ? (cita.estado || "confirmada") : (isBlocked ? "bloqueado" : "libre");
+
+    let badgeHtml = "";
+    if (!isBlocked) {
+      badgeHtml = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">🟢 LIBRE</span>`;
+    } else if (estado === "pendiente") {
+      badgeHtml = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">🟡 Pendiente</span>`;
+    } else {
+      badgeHtml = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">✅ Confirmada</span>`;
+    }
 
     return `
-      <div onclick="abrirEditorCita('${fecha}', '${s}')" class="p-3 rounded-xl border text-left cursor-pointer transition-all hover:scale-102 flex flex-col justify-between ${isBlocked ? 'bg-red-950/30 border-red-500/50 hover:border-red-400' : 'bg-emerald-950/30 border-emerald-500/50 hover:border-emerald-400'}">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-sm font-bold text-white font-mono">${s}</span>
-          <span class="text-[9px] uppercase tracking-wider py-0.5 px-2 rounded-full font-bold ${isBlocked ? 'bg-red-500 text-black' : 'bg-emerald-500/20 text-emerald-400'}">
-            ${isBlocked ? '🔴 Ocupado' : '🟢 Libre'}
-          </span>
-        </div>
-        <div class="truncate">
-          <p class="text-xs font-semibold ${isBlocked ? 'text-red-300' : 'text-gray-400'} truncate">${nombreCliente}</p>
-          ${cita && cita.notas ? `<p class="text-[10px] text-gray-500 truncate mt-0.5">${cita.notas}</p>` : ''}
+      <div onclick="abrirEditorCita('${fecha}', '${s}')" class="p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer ${isBlocked ? (estado === 'pendiente' ? 'bg-[#1d1810] border-amber-500/40 hover:border-amber-400' : 'bg-[#141923] border-gray-800 hover:border-gold-500/50') : 'bg-brandDark-950/60 border-gray-800/80 hover:border-emerald-500/40'}">
+        <div class="flex items-center justify-between gap-3">
+          
+          <div class="flex items-start sm:items-center gap-3 min-w-0">
+            <span class="text-base sm:text-lg font-black font-mono text-gold-400 w-14 sm:w-16 flex-shrink-0 pt-0.5 sm:pt-0">${s}</span>
+            
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-black text-sm text-white truncate">${isBlocked ? nombreCliente : '<span class="text-gray-500 font-normal">Hueco libre</span>'}</span>
+                ${badgeHtml}
+              </div>
+              
+              ${isBlocked && cita ? `
+                <div class="text-[11px] text-gray-400 flex items-center gap-2 mt-1 flex-wrap">
+                  ${cita.servicio ? `<span class="text-gold-400/90 font-medium">✂️ ${cita.servicio}</span>` : ''}
+                  ${cita.telefono ? `<span>📞 ${cita.telefono}</span>` : ''}
+                  ${cita.notas ? `<span class="text-gray-400 italic">💬 "${cita.notas}"</span>` : ''}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            ${isBlocked && cita && cita.telefono ? `
+              ${estado === 'pendiente' ? `
+                <button type="button" onclick="event.stopPropagation(); confirmarCitaPorWhatsAppRapido('${fecha}', '${s}')" title="Confirmar por WhatsApp al cliente" class="hidden sm:inline-flex px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] items-center gap-1 shadow-md shadow-emerald-950/50 transition-all">
+                  <span>✅</span> <span>Confirmar</span>
+                </button>
+              ` : `
+                <button type="button" onclick="event.stopPropagation(); recordarCitaPorWhatsAppRapido('${fecha}', '${s}')" title="Enviar recordatorio WhatsApp" class="hidden sm:inline-flex px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-[11px] items-center gap-1 transition-all">
+                  <span>🔔</span> <span>Recordar</span>
+                </button>
+              `}
+            ` : ''}
+
+            <button type="button" onclick="event.stopPropagation(); abrirEditorCita('${fecha}', '${s}')" class="px-3 py-1.5 rounded-xl ${isBlocked ? 'bg-gray-800 hover:bg-gray-700 text-gray-200' : 'bg-gold-gradient text-black font-extrabold'} text-xs font-semibold transition-all">
+              ${isBlocked ? '✏️ Ver' : '+ Apuntar'}
+            </button>
+          </div>
+
         </div>
       </div>
     `;
@@ -832,6 +964,9 @@ function initEditorCitaModal() {
     const servicio = document.getElementById("edit-cliente-servicio").value;
     const notas = document.getElementById("edit-cliente-notas").value.trim();
 
+    const citaExistente = DB_CITAS.find(c => (c.fecha === fecha && c.hora === hora));
+    const estadoActual = (citaExistente && citaExistente.estado) ? citaExistente.estado : "confirmada";
+
     const citaObj = {
       fecha: fecha,
       hora: hora,
@@ -839,6 +974,7 @@ function initEditorCitaModal() {
       telefono: telefono,
       servicio: servicio,
       notas: notas,
+      estado: estadoActual,
       actualizadoEn: new Date().toISOString()
     };
 
@@ -901,8 +1037,13 @@ window.abrirEditorCita = function(fecha, hora) {
   timeLabel.textContent = `📅 ${fecha} • ⏰ ${hora} h`;
 
   if (isBlocked) {
-    statusBadge.textContent = "🔴 Ocupado";
-    statusBadge.className = "text-[10px] font-sans py-0.5 px-2 rounded-full uppercase font-bold bg-red-500 text-black";
+    if (cita && cita.estado === "pendiente") {
+      statusBadge.textContent = "🟡 Pendiente de Confirmar";
+      statusBadge.className = "text-[10px] font-sans py-0.5 px-2 rounded-full uppercase font-bold bg-amber-500 text-black";
+    } else {
+      statusBadge.textContent = "✅ Confirmada";
+      statusBadge.className = "text-[10px] font-sans py-0.5 px-2 rounded-full uppercase font-bold bg-emerald-500 text-black";
+    }
   } else {
     statusBadge.textContent = "🟢 Disponible";
     statusBadge.className = "text-[10px] font-sans py-0.5 px-2 rounded-full uppercase font-bold bg-emerald-500/20 text-emerald-400";
@@ -917,9 +1058,10 @@ window.abrirEditorCita = function(fecha, hora) {
   // Botones de llamada / whatsapp directa si hay teléfono
   if (cita && cita.telefono) {
     contactActions.classList.remove("hidden");
-    const telLimpio = cita.telefono.replace(/\s+/g, '');
-    btnCall.href = `tel:${telLimpio}`;
-    btnWhatsApp.href = `https://wa.me/34${telLimpio.replace('+34', '')}?text=Hola%20${encodeURIComponent(cita.nombre || '')},%20te%20escribimos%20de%20Barber%C3%ADa%20DMA`;
+    let telLimpio = cita.telefono.replace(/\s+/g, '').replace('+', '');
+    if (!telLimpio.startsWith('34') && telLimpio.length === 9) telLimpio = '34' + telLimpio;
+    btnCall.href = `tel:+${telLimpio}`;
+    btnWhatsApp.href = `https://wa.me/${telLimpio}?text=Hola%20${encodeURIComponent(cita.nombre || '')},%20te%20escribimos%20de%20Barber%C3%ADa%20DMA`;
   } else {
     contactActions.classList.add("hidden");
   }
@@ -932,6 +1074,62 @@ window.cerrarEditorCita = function() {
   const modal = document.getElementById("appointment-edit-modal");
   if (modal) modal.classList.add("hidden");
   adminState.citaEnEdicion = null;
+};
+
+// Acciones rápidas de WhatsApp para el barbero
+window.confirmarCitaPorWhatsAppRapido = async function(fecha, hora) {
+  const cita = DB_CITAS.find(c => c.fecha === fecha && c.hora === hora);
+  if (!cita || !cita.telefono) return alert("Esta cita no tiene teléfono del cliente registrado.");
+
+  // Actualizar estado a confirmada
+  cita.estado = "confirmada";
+  localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
+  if (firebaseDb) {
+    const docId = `${fecha}_${hora.replace(':', '')}`;
+    try {
+      await firebaseDb.collection("citas").doc(docId).set(cita, { merge: true });
+    } catch (e) {
+      console.warn("Aviso Firestore al confirmar:", e);
+    }
+  }
+
+  const [y, m, d] = fecha.split('-').map(Number);
+  const fObj = new Date(y, m - 1, d);
+  const fechaTxt = fObj.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  let tel = cita.telefono.replace(/\s+/g, '').replace('+', '');
+  if (!tel.startsWith('34') && tel.length === 9) tel = '34' + tel;
+
+  const msj = `💈 *BARBERÍA DMA - CITA CONFIRMADA*\n\n👋 ¡Hola ${cita.nombre}!\nTu cita queda confirmada para el *${fechaTxt}* a las *${hora} h*.\n✂️ Servicio: ${cita.servicio || 'Corte'}.\n📍 C. Ignacio Herrero Garralda, 1, Oviedo.\n\n¡Te esperamos!`;
+  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msj)}`, '_blank');
+  renderizarHorariosAdmin();
+};
+
+window.recordarCitaPorWhatsAppRapido = function(fecha, hora) {
+  const cita = DB_CITAS.find(c => c.fecha === fecha && c.hora === hora);
+  if (!cita || !cita.telefono) return alert("Esta cita no tiene teléfono del cliente registrado.");
+
+  const [y, m, d] = fecha.split('-').map(Number);
+  const fObj = new Date(y, m - 1, d);
+  const fechaTxt = fObj.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  let tel = cita.telefono.replace(/\s+/g, '').replace('+', '');
+  if (!tel.startsWith('34') && tel.length === 9) tel = '34' + tel;
+
+  const msj = `💈 *BARBERÍA DMA - RECORDATORIO*\n\n👋 ¡Hola ${cita.nombre}!\nTe recordamos tu cita para *${fechaTxt}* a las *${hora} h* en Barbería DMA.\n📍 C. Ignacio Herrero Garralda, 1, Oviedo.\n\nSi necesitas modificarla o surge cualquier imprevisto, avísanos por aquí. ¡Nos vemos pronto!`;
+  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msj)}`, '_blank');
+};
+
+window.confirmarCitaPorWhatsAppModal = function() {
+  if (!adminState.citaEnEdicion) return;
+  const { fecha, hora } = adminState.citaEnEdicion;
+  confirmarCitaPorWhatsAppRapido(fecha, hora);
+};
+
+window.recordarCitaPorWhatsAppModal = function() {
+  if (!adminState.citaEnEdicion) return;
+  const { fecha, hora } = adminState.citaEnEdicion;
+  recordarCitaPorWhatsAppRapido(fecha, hora);
 };
 
 window.liberarTurnoActualAdmin = async function() {
@@ -1015,25 +1213,28 @@ window.buscarCitasAdmin = function() {
   resultsContainer.innerHTML = filtradas.map(c => `
     <div class="p-3.5 rounded-xl bg-brandDark-950 border border-gray-800 hover:border-gold-500/40 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div class="space-y-1">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="text-xs font-mono font-bold text-gold-400 bg-gold-500/10 px-2 py-0.5 rounded-md border border-gold-500/20">${c.fecha} • ${c.hora}</span>
           <span class="text-xs font-bold text-white">${c.nombre || 'Sin nombre'}</span>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${c.estado === 'confirmada' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'}">
+            ${c.estado === 'confirmada' ? '✅ Confirmada' : '🟡 Pendiente'}
+          </span>
         </div>
         <p class="text-xs text-gray-400 font-medium">${c.servicio || 'Servicio no especificado'}</p>
         ${c.notas ? `<p class="text-[11px] text-gray-500 italic">💬 "${c.notas}"</p>` : ''}
       </div>
 
-      <div class="flex items-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-800">
+      <div class="flex items-center gap-1.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-800 flex-wrap">
         ${c.telefono ? `
-          <a href="tel:${c.telefono.replace(/\s+/g, '')}" class="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gold-400 text-xs font-bold" title="Llamar: ${c.telefono}">
-            📞
-          </a>
-          <a href="https://wa.me/34${c.telefono.replace(/\s+/g, '').replace('+34', '')}" target="_blank" rel="noopener" class="p-2 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 text-xs font-bold" title="WhatsApp: ${c.telefono}">
-            💬
-          </a>
+          <button type="button" onclick="confirmarCitaPorWhatsAppRapido('${c.fecha}', '${c.hora}')" class="px-2 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white text-xs font-bold transition-all" title="Confirmar Cita por WhatsApp">
+            ✅ Confirmar
+          </button>
+          <button type="button" onclick="recordarCitaPorWhatsAppRapido('${c.fecha}', '${c.hora}')" class="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold transition-all" title="Enviar recordatorio WhatsApp">
+            🔔 Recordar
+          </button>
         ` : ''}
-        <button type="button" onclick="abrirEditorCita('${c.fecha}', '${c.hora}')" class="px-3 py-1.5 rounded-lg bg-gold-500/15 hover:bg-gold-500/30 text-gold-400 border border-gold-500/30 text-xs font-bold">
-          Ver / Editar
+        <button type="button" onclick="abrirEditorCita('${c.fecha}', '${c.hora}')" class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gold-400 border border-gray-700 text-xs font-bold transition-all">
+          ✏️ Ver
         </button>
       </div>
     </div>

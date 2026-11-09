@@ -778,23 +778,43 @@
           </button>
         </div>
 
-        <!-- VISTA 1: AGENDA DE TURNOS -->
+        <!-- VISTA 1: AGENDA DE TURNOS (MODO LIBRETA DEL BARBERO) -->
         <div id="subview-turnos" class="space-y-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <p class="text-xs text-gray-400">Pulsa cualquier turno para <strong class="text-white">asignar cliente</strong>, <strong class="text-gold-400">anotaciones</strong> o <strong class="text-red-400">bloquear</strong>.</p>
-              <span id="admin-current-date-badge" class="text-xs text-gold-400 font-semibold font-mono"></span>
+          
+          <!-- Barra de Navegación de Fecha tipo Libreta -->
+          <div class="bg-brandDark-950 p-3 sm:p-4 rounded-2xl border border-gray-800 space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <button type="button" onclick="cambiarDiaRelativo(-1)" class="p-2 sm:px-3 sm:py-2 rounded-xl bg-gray-800/80 hover:bg-gray-700 text-gold-400 font-bold text-xs flex items-center gap-1 transition-colors">
+                <span>◀</span> <span class="hidden sm:inline">Día Ant.</span>
+              </button>
+
+              <div class="text-center">
+                <h3 id="admin-notebook-date-title" class="text-sm sm:text-base font-black font-heading text-white uppercase tracking-wide">
+                  Cargando día...
+                </h3>
+                <span id="admin-current-date-badge" class="text-[11px] text-gold-400 font-mono"></span>
+              </div>
+
+              <button type="button" onclick="cambiarDiaRelativo(1)" class="p-2 sm:px-3 sm:py-2 rounded-xl bg-gray-800/80 hover:bg-gray-700 text-gold-400 font-bold text-xs flex items-center gap-1 transition-colors">
+                <span class="hidden sm:inline">Día Sig.</span> <span>▶</span>
+              </button>
             </div>
-            
-            <div class="flex items-center gap-2">
-              <label for="admin-date-picker" class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Día:</label>
-              <input type="date" id="admin-date-picker" class="bg-brandDark-950 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-gold-500">
+
+            <!-- Accesos Rápidos de Días -->
+            <div class="flex items-center justify-center gap-1.5 flex-wrap pt-2 border-t border-gray-800/60 text-xs">
+              <button type="button" onclick="irADiaDirecto(0)" class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold text-[11px]">Hoy</button>
+              <button type="button" onclick="irADiaDirecto(1)" class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold text-[11px]">Mañana</button>
+              <button type="button" onclick="irADiaDirecto(2)" class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold text-[11px]">Pasado</button>
+              <div class="inline-flex items-center gap-1 bg-gray-800/60 rounded-lg px-2 py-0.5 border border-gray-700">
+                <span class="text-[10px] text-gray-400">Ir a:</span>
+                <input type="date" id="admin-date-picker" class="bg-transparent text-gold-400 text-xs font-mono focus:outline-none cursor-pointer">
+              </div>
             </div>
           </div>
 
-          <!-- Grid de slots interactivos -->
-          <div id="admin-slots-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
-            <!-- Cargado dinámicamente -->
+          <!-- Lista Vertical de la Libreta (Líneas de la Libreta) -->
+          <div id="admin-slots-grid" class="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+            <!-- Cargado dinámicamente estilo Libreta -->
           </div>
 
           <!-- Estado de conexión Firebase -->
@@ -803,7 +823,7 @@
               <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
               <span class="text-emerald-400 font-medium">Sincronización en tiempo real activa</span>
             </div>
-            <span class="text-[11px] text-gray-500">Pulsa un turno para ver o añadir datos</span>
+            <span class="text-[11px] text-gray-500">Toca cualquier hora para ver o gestionar</span>
           </div>
         </div>
 
@@ -926,14 +946,24 @@
           <textarea id="edit-cliente-notas" rows="2" placeholder="Ej: Degradado medio afeitado a navaja, prefiere producto mate..." class="w-full bg-brandDark-950 border border-gray-700 rounded-xl p-2.5 text-white text-xs focus:outline-none focus:border-gold-500"></textarea>
         </div>
 
-        <!-- Acciones directas de llamada si hay teléfono -->
-        <div id="edit-contact-actions" class="hidden flex items-center gap-2 pt-1">
-          <a id="btn-call-client" href="#" class="flex-1 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors border border-gray-700">
-            <span>📞</span> <span>Llamar al cliente</span>
-          </a>
-          <a id="btn-whatsapp-client" href="#" target="_blank" rel="noopener" class="flex-1 py-2 px-3 rounded-xl bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors border border-emerald-500/30">
-            <span>💬</span> <span>Escribir WhatsApp</span>
-          </a>
+        <!-- Acciones directas con el Cliente -->
+        <div id="edit-contact-actions" class="hidden space-y-2 pt-1">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button type="button" onclick="confirmarCitaPorWhatsAppModal()" class="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/50 transition-all">
+              <span>✅</span> <span>Confirmar WhatsApp</span>
+            </button>
+            <button type="button" onclick="recordarCitaPorWhatsAppModal()" class="py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center justify-center gap-1.5 transition-all">
+              <span>🔔</span> <span>Enviar Recordatorio</span>
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <a id="btn-call-client" href="#" class="flex-1 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors border border-gray-700">
+              <span>📞</span> <span>Llamar al cliente</span>
+            </a>
+            <a id="btn-whatsapp-client" href="#" target="_blank" rel="noopener" class="flex-1 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-emerald-400 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors border border-gray-700">
+              <span>💬</span> <span>Abrir Chat Libre</span>
+            </a>
+          </div>
         </div>
 
         <div class="pt-3 border-t border-gray-800 flex flex-col sm:flex-row items-center gap-2.5">
@@ -949,11 +979,8 @@
     </div>
   </div>
 
-    </div>
-  </div>
-
   <!-- Scripts -->
-  <script src="js/app.js?v=4.0"></script>
+  <script src="js/app.js?v=5.0"></script>
   <script>
     // Año actual automático
     const yr = document.getElementById("current-year");

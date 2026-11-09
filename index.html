@@ -112,7 +112,7 @@
         
         <!-- Logo -->
         <a href="#" class="flex items-center gap-3 group">
-          <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-gold-400 to-gold-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-gold-500/20 group-hover:scale-105 transition-transform">
+          <div onclick="handleSecretLogoClick(event)" title="Barbería DMA" class="w-11 h-11 rounded-xl bg-gradient-to-br from-gold-400 to-gold-600 flex items-center justify-center text-black font-black text-xl shadow-lg shadow-gold-500/20 group-hover:scale-105 transition-transform cursor-pointer select-none">
             <span>✂</span>
           </div>
           <div>
@@ -456,14 +456,6 @@
 
       </div>
 
-      <!-- Acceso Barbero Discreto -->
-      <div class="mt-8 text-center">
-        <button type="button" onclick="abrirModalBarbero()" class="btn-open-barber-panel text-xs text-gray-400 hover:text-gold-400 inline-flex items-center gap-1.5 transition-colors py-2 px-4 rounded-xl border border-gray-800 hover:border-gold-500/50 bg-brandDark-850">
-          <span>🔐</span>
-          <span class="font-semibold">Acceso Barbero (Bloquear / Liberar Horas)</span>
-        </button>
-      </div>
-
     </div>
   </section>
 
@@ -710,11 +702,10 @@
         <a href="#reservas" class="hover:text-gold-400">Reservar Cita</a>
         <a href="tel:+34610245360" class="hover:text-gold-400">Tel: 610 24 53 60</a>
         <a href="https://maps.google.com/?q=Barberia+DMA+Oviedo+Ignacio+Herrero+Garralda+1" target="_blank" rel="noopener noreferrer" class="hover:text-gold-400">Cómo llegar</a>
-        <button type="button" onclick="abrirModalBarbero()" class="btn-open-barber-panel hover:text-gold-400 text-gold-500 font-semibold">🔐 Acceso Barbero</button>
       </div>
 
       <div class="text-center md:text-right">
-        <p>© <span id="current-year">2026</span> Barbería DMA. Todos los derechos reservados.</p>
+        <p>© <span id="current-year">2026</span> Barbería DMA<span onclick="abrirModalBarbero()" class="cursor-pointer text-gray-600 hover:text-gold-400 select-none transition-colors" title="Acceso">.</span> Todos los derechos reservados.</p>
         <p class="text-[10px] text-gray-600 mt-0.5">Alojado 100% gratis en GitHub Pages • Sin servidores ni cuotas</p>
       </div>
 
@@ -763,20 +754,23 @@
         </form>
       </div>
 
-      <!-- SECCIÓN 2: Gestión con Pestañas Internas (Turnos, Cambiar PIN, Firebase) -->
+      <!-- SECCIÓN 2: Gestión con Pestañas Internas (Turnos, Buscador, Cambiar PIN, Firebase) -->
       <div id="barber-manage-section" class="hidden space-y-5">
         
         <!-- Pestañas internas -->
         <div class="flex items-center justify-between border-b border-gray-800 pb-3 gap-2 flex-wrap">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <button type="button" onclick="setSubTabAdmin('turnos')" id="subtab-btn-turnos" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gold-500 text-black transition-all">
-              📅 Agenda de Turnos
+              📅 Agenda
+            </button>
+            <button type="button" onclick="setSubTabAdmin('buscador')" id="subtab-btn-buscador" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white bg-gray-800/60 transition-all flex items-center gap-1.5">
+              <span>🔍</span> <span>Buscar Citas</span>
             </button>
             <button type="button" onclick="setSubTabAdmin('pin')" id="subtab-btn-pin" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white bg-gray-800/60 transition-all">
-              🔑 Cambiar PIN (6 dígitos)
+              🔑 Cambiar PIN
             </button>
             <button type="button" onclick="setSubTabAdmin('firebase')" id="subtab-btn-firebase" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white bg-gray-800/60 transition-all">
-              ☁️ Firebase Cloud
+              ☁️ Firebase
             </button>
           </div>
           <button type="button" onclick="cerrarSesionAdmin()" class="text-[11px] text-gray-500 hover:text-red-400 transition-colors">
@@ -788,7 +782,7 @@
         <div id="subview-turnos" class="space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <p class="text-xs text-gray-400">Toca con el dedo cualquier turno para ponerlo <strong class="text-red-400">OCUPADO</strong> o <strong class="text-emerald-400">LIBRE</strong>.</p>
+              <p class="text-xs text-gray-400">Pulsa cualquier turno para <strong class="text-white">asignar cliente</strong>, <strong class="text-gold-400">anotaciones</strong> o <strong class="text-red-400">bloquear</strong>.</p>
               <span id="admin-current-date-badge" class="text-xs text-gold-400 font-semibold font-mono"></span>
             </div>
             
@@ -799,7 +793,7 @@
           </div>
 
           <!-- Grid de slots interactivos -->
-          <div id="admin-slots-grid" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 max-h-[280px] overflow-y-auto pr-1">
+          <div id="admin-slots-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
             <!-- Cargado dinámicamente -->
           </div>
 
@@ -809,11 +803,29 @@
               <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
               <span class="text-emerald-400 font-medium">Sincronización en tiempo real activa</span>
             </div>
-            <span class="text-[11px] text-gray-500">Sin tokens de GitHub requeridos</span>
+            <span class="text-[11px] text-gray-500">Pulsa un turno para ver o añadir datos</span>
           </div>
         </div>
 
-        <!-- VISTA 2: CAMBIAR PIN (MÍNIMO 6 DÍGITOS) -->
+        <!-- VISTA 2: BUSCADOR DE CITAS & CLIENTES -->
+        <div id="subview-buscador" class="hidden space-y-4">
+          <div>
+            <label for="admin-search-input" class="block text-xs font-bold uppercase tracking-wider text-gold-400 mb-1.5">
+              Buscar Citas de Clientes
+            </label>
+            <div class="relative">
+              <input type="text" id="admin-search-input" oninput="buscarCitasAdmin()" placeholder="Escribe nombre, teléfono, servicio o fecha (ej: Carlos, 610, barba, 2026-11)..." class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-4 py-2.5 pl-10 text-white text-xs focus:outline-none focus:border-gold-500">
+              <span class="absolute left-3.5 top-2.5 text-gray-500 text-sm">🔍</span>
+            </div>
+          </div>
+
+          <!-- Resultados de búsqueda -->
+          <div id="admin-search-results" class="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
+            <!-- Cargado dinámicamente -->
+          </div>
+        </div>
+
+        <!-- VISTA 3: CAMBIAR PIN (MÍNIMO 6 DÍGITOS) -->
         <div id="subview-pin" class="hidden space-y-4 max-w-sm mx-auto py-2">
           <div class="text-center">
             <h4 class="text-base font-bold text-white uppercase font-heading">Cambiar PIN del Barbero</h4>
@@ -823,7 +835,7 @@
           <form id="form-cambiar-pin" class="space-y-3">
             <div>
               <label for="pin-actual" class="block text-[11px] font-bold text-gray-300 mb-1">PIN Actual</label>
-              <input type="password" id="pin-actual" required minlength="6" placeholder="Introduce el PIN actual" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-4 py-2 text-white text-sm focus:outline-none focus:border-gold-500">
+              <input type="password" id="pin-actual" required minlength="4" placeholder="Introduce el PIN actual" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-4 py-2 text-white text-sm focus:outline-none focus:border-gold-500">
             </div>
             <div>
               <label for="pin-nuevo" class="block text-[11px] font-bold text-gray-300 mb-1">Nuevo PIN (Mínimo 6 dígitos)</label>
@@ -840,16 +852,16 @@
           </form>
         </div>
 
-        <!-- VISTA 3: CONFIGURACIÓN FIREBASE -->
+        <!-- VISTA 4: CONFIGURACIÓN FIREBASE -->
         <div id="subview-firebase" class="hidden space-y-4 py-2">
           <div class="text-left bg-brandDark-950 p-4 rounded-xl border border-gray-800 space-y-2 text-xs text-gray-300">
             <p class="font-bold text-gold-400 uppercase text-[11px] tracking-wider">🔥 Conexión Firebase Firestore</p>
             <p class="text-gray-400 leading-relaxed">
-              Firebase es el servicio gratuito de Google que sincroniza los huecos ocupados en tiempo real entre el móvil del barbero y los clientes.
+              Base de datos en tiempo real de Barbería DMA en Google Cloud Firestore.
             </p>
             <div class="pt-2">
-              <label for="firebase-config-input" class="block text-[11px] font-bold text-gray-300 mb-1">Configuración Firebase (JSON o pegar objeto):</label>
-              <textarea id="firebase-config-input" rows="5" placeholder='{\n  "apiKey": "AIzaSy...",\n  "projectId": "barberia-dma-xxx",\n  ...\n}' class="w-full bg-[#151922] border border-gray-700 rounded-xl p-3 text-xs text-white font-mono focus:outline-none focus:border-gold-500"></textarea>
+              <label for="firebase-config-input" class="block text-[11px] font-bold text-gray-300 mb-1">Configuración actual de Firebase:</label>
+              <textarea id="firebase-config-input" rows="5" class="w-full bg-[#151922] border border-gray-700 rounded-xl p-3 text-xs text-white font-mono focus:outline-none focus:border-gold-500"></textarea>
             </div>
             <div class="flex items-center gap-3 pt-2">
               <button type="button" onclick="guardarConfigFirebase()" class="px-5 py-2.5 rounded-xl bg-gold-gradient text-black font-bold text-xs uppercase tracking-wider">
@@ -867,8 +879,81 @@
     </div>
   </div>
 
+  <!-- ==================== SUBMODAL: ASIGNAR / EDITAR CITA ==================== -->
+  <div id="appointment-edit-modal" class="hidden fixed inset-0 z-[60] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="glass-card bg-[#151922] border border-gold-500/40 rounded-3xl max-w-lg w-full p-6 shadow-2xl relative my-auto">
+      
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+        <div>
+          <h3 class="text-lg font-black font-heading text-white uppercase flex items-center gap-2">
+            <span>Gestión de Cita</span>
+            <span id="edit-modal-status-badge" class="text-[10px] font-sans py-0.5 px-2 rounded-full uppercase font-bold"></span>
+          </h3>
+          <p id="edit-modal-time-label" class="text-xs text-gold-400 font-mono font-semibold mt-0.5"></p>
+        </div>
+        <button type="button" onclick="cerrarEditorCita()" class="text-gray-400 hover:text-white p-2 rounded-xl bg-gray-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <form id="form-guardar-cita-admin" class="space-y-3.5 pt-4">
+        <div>
+          <label for="edit-cliente-nombre" class="block text-[11px] font-bold text-gray-300 mb-1">Nombre del Cliente *</label>
+          <input type="text" id="edit-cliente-nombre" placeholder="Ej: Carlos Gómez (o 'Bloqueado')" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label for="edit-cliente-tel" class="block text-[11px] font-bold text-gray-300 mb-1">Teléfono</label>
+            <input type="tel" id="edit-cliente-tel" placeholder="Ej: 610 24 53 60" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
+          </div>
+          <div>
+            <label for="edit-cliente-servicio" class="block text-[11px] font-bold text-gray-300 mb-1">Servicio</label>
+            <select id="edit-cliente-servicio" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
+              <option value="Corte de Pelo Caballero">Corte Caballero (15€)</option>
+              <option value="Arreglo de Barba con Toalla Caliente">Arreglo Barba (12€)</option>
+              <option value="Combo VIP: Corte + Arreglo de Barba">Combo Corte + Barba (25€)</option>
+              <option value="Afeitado Clásico de Cabeza">Afeitado Cabeza (15€)</option>
+              <option value="Corte de Pelo Niño">Corte Infantil (13€)</option>
+              <option value="Lavado, Masaje Capilar & Peinado">Lavado & Peinado (8€)</option>
+              <option value="Otro / Personalizado">Otro / Personalizado</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label for="edit-cliente-notas" class="block text-[11px] font-bold text-gray-300 mb-1">Anotaciones del Barbero (Opcional)</label>
+          <textarea id="edit-cliente-notas" rows="2" placeholder="Ej: Degradado medio afeitado a navaja, prefiere producto mate..." class="w-full bg-brandDark-950 border border-gray-700 rounded-xl p-2.5 text-white text-xs focus:outline-none focus:border-gold-500"></textarea>
+        </div>
+
+        <!-- Acciones directas de llamada si hay teléfono -->
+        <div id="edit-contact-actions" class="hidden flex items-center gap-2 pt-1">
+          <a id="btn-call-client" href="#" class="flex-1 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors border border-gray-700">
+            <span>📞</span> <span>Llamar al cliente</span>
+          </a>
+          <a id="btn-whatsapp-client" href="#" target="_blank" rel="noopener" class="flex-1 py-2 px-3 rounded-xl bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors border border-emerald-500/30">
+            <span>💬</span> <span>Escribir WhatsApp</span>
+          </a>
+        </div>
+
+        <div class="pt-3 border-t border-gray-800 flex flex-col sm:flex-row items-center gap-2.5">
+          <button type="submit" class="w-full sm:flex-1 py-3 rounded-xl bg-gold-gradient text-black font-black text-xs uppercase tracking-wider hover:scale-105 active:scale-95 transition-all">
+            💾 Guardar Cita & Bloquear
+          </button>
+          <button type="button" onclick="liberarTurnoActualAdmin()" id="btn-liberar-turno" class="w-full sm:w-auto py-3 px-4 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-300 font-bold text-xs border border-red-500/40 transition-colors">
+            🔓 Liberar Turno
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+
+    </div>
+  </div>
+
   <!-- Scripts -->
-  <script src="js/app.js"></script>
+  <script src="js/app.js?v=4.0"></script>
   <script>
     // Año actual automático
     const yr = document.getElementById("current-year");

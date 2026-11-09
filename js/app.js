@@ -9,8 +9,7 @@ const BARBERIA_CONFIG = {
   telefonoLimpio: "34610245360",
   direccion: "C. Ignacio Herrero Garralda, 1, 33011 Oviedo, Asturias",
   googleMapsUrl: "https://maps.google.com/?q=Barberia+DMA+Oviedo+Ignacio+Herrero+Garralda+1",
-  pinBarberoPorDefecto: "123456", // Mínimo 6 dígitos
-  // Configuración oficial de Firebase Firestore de Barbería DMA
+  pinBarberoPorDefecto: "123456",
   firebaseConfig: {
     apiKey: "AIzaSyDuh_jztJVGXrJRyzbXcusIvRJq-fpkc4g",
     authDomain: "barberia-dma.firebaseapp.com",
@@ -81,12 +80,13 @@ const BARBERIA_CONFIG = {
   ]
 };
 
-// Base de datos de bloqueos en memoria y cache
+// Base de datos en memoria y cache
 let DB_BLOQUEOS = {
   bloqueos: {} // {"2026-11-10": ["11:30", "16:00"]}
 };
+let DB_CITAS = []; // Array con todas las citas guardadas con cliente y notas
 
-// Estado del cliente
+// Estado de reserva del cliente público
 let reservaState = {
   servicioSeleccionado: BARBERIA_CONFIG.servicios[0],
   fecha: "",
@@ -100,8 +100,13 @@ let reservaState = {
 let adminState = {
   autenticado: false,
   fechaSeleccionada: "",
-  pinGuardado: localStorage.getItem("dma_admin_pin") || BARBERIA_CONFIG.pinBarberoPorDefecto
+  pinGuardado: localStorage.getItem("dma_admin_pin") || BARBERIA_CONFIG.pinBarberoPorDefecto,
+  citaEnEdicion: null // { fecha: "2026-11-10", hora: "11:30" }
 };
+
+// Contador de toques para acceso secreto
+let secretLogoClicks = 0;
+let secretLogoTimer = null;
 
 // Instancia de Firebase Firestore
 let firebaseDb = null;
@@ -114,8 +119,10 @@ document.addEventListener("DOMContentLoaded", () => {
     initCalendarioUI();
     initFormularioReserva();
     initPanelBarbero();
+    initEditorCitaModal();
     initMobileMenu();
     initFaqAccordion();
+    initSecretTriggers();
     initFirebase();
   } catch (err) {
     console.error("Error al iniciar:", err);
@@ -123,7 +130,39 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ============================================================
-   1. FIREBASE FIRESTORE EN TIEMPO REAL (SIN TOKENS)
+   1. ACCESOS SECRETOS / OCULTOS PARA EL BARBERO
+   ============================================================ */
+function initSecretTriggers() {
+  // Comprobar si entró con #admin o #barbero en la URL
+  checkAdminHash();
+  window.addEventListener("hashchange", checkAdminHash);
+}
+
+function checkAdminHash() {
+  const hash = window.location.hash.toLowerCase();
+  if (hash === "#admin" || hash === "#barbero" || hash === "#agenda") {
+    abrirModalBarbero();
+  }
+}
+
+// Triple toque en el logo ✂️ de la cabecera
+window.handleSecretLogoClick = function(event) {
+  if (event) event.preventDefault();
+  secretLogoClicks++;
+  clearTimeout(secretLogoTimer);
+
+  if (secretLogoClicks >= 3) {
+    secretLogoClicks = 0;
+    abrirModalBarbero();
+  } else {
+    secretLogoTimer = setTimeout(() => {
+      secretLogoClicks = 0;
+    }, 1500); // 3 clics en menos de 1.5s
+  }
+};
+
+/* ============================================================
+   2. FIREBASE FIRESTORE EN TIEMPO REAL
    ============================================================ */
 function initFirebase() {
   const statusBadge = document.getElementById("firebase-status-badge");
@@ -135,9 +174,7 @@ function initFirebase() {
   if (savedConfigStr) {
     try {
       configToUse = JSON.parse(savedConfigStr);
-    } catch (e) {
-      console.warn("Configuración guardada de Firebase no válida");
-    }
+    } catch (e) {}
   } else if (BARBERIA_CONFIG.firebaseConfig && BARBERIA_CONFIG.firebaseConfig.projectId) {
     configToUse = BARBERIA_CONFIG.firebaseConfig;
   }
@@ -160,7 +197,7 @@ function initFirebase() {
         `;
       }
 
-      // Escuchar bloqueos en tiempo real
+      // 1. Escuchar bloqueos de turnos
       firebaseDb.collection("bloqueos").onSnapshot((snapshot) => {
         snapshot.forEach((doc) => {
           const data = doc.data();
@@ -174,22 +211,33 @@ function initFirebase() {
         if (adminState.autenticado) {
           renderizarHorariosAdmin();
         }
-      }, (err) => {
-        console.warn("Aviso Firestore bloqueos:", err);
-      });
+      }, (err) => console.warn("Aviso Firestore bloqueos:", err));
 
-      // Escuchar cambios de PIN en tiempo real
+      // 2. Escuchar todas las citas de clientes
+      firebaseDb.collection("citas").onSnapshot((snapshot) => {
+        const citasArray = [];
+        snapshot.forEach((doc) => {
+          citasArray.push({ id: doc.id, ...doc.data() });
+        });
+        DB_CITAS = citasArray;
+        localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
+
+        if (adminState.autenticado) {
+          renderizarHorariosAdmin();
+          buscarCitasAdmin();
+        }
+      }, (err) => console.warn("Aviso Firestore citas:", err));
+
+      // 3. Escuchar PIN
       firebaseDb.collection("config").doc("seguridad").onSnapshot((doc) => {
         if (doc.exists) {
           const data = doc.data();
-          if (data.pin && data.pin.length >= 6) {
+          if (data.pin && data.pin.length >= 4) {
             adminState.pinGuardado = data.pin;
             localStorage.setItem("dma_admin_pin", data.pin);
           }
         }
-      }, (err) => {
-        console.warn("Aviso Firestore PIN:", err);
-      });
+      }, (err) => console.warn("Aviso Firestore PIN:", err));
 
     } catch (err) {
       console.error("Error al inicializar Firebase:", err);
@@ -205,7 +253,7 @@ function mostrarEstadoLocal() {
   if (statusBadge) {
     statusBadge.innerHTML = `
       <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-      <span class="text-amber-400 font-medium">Modo Local Activo (Pega tu config de Firebase en la pestaña Firebase)</span>
+      <span class="text-amber-400 font-medium">Modo Local Activo (Pruebas)</span>
     `;
   }
 }
@@ -215,30 +263,26 @@ function guardarConfigFirebase() {
   if (!input) return;
 
   const raw = input.value.trim();
-  if (!raw) {
-    alert("Por favor introduce la configuración de Firebase.");
-    return;
-  }
+  if (!raw) return alert("Por favor introduce la configuración de Firebase.");
 
   try {
     let parsed = null;
     if (raw.startsWith("{")) {
       parsed = JSON.parse(raw);
     } else {
-      // Intenta extraer claves si pegaron const firebaseConfig = {...}
       const match = raw.match(/\{[\s\S]*\}/);
       if (match) parsed = JSON.parse(match[0]);
     }
 
     if (parsed && parsed.projectId) {
       localStorage.setItem("dma_firebase_config", JSON.stringify(parsed));
-      alert("✅ ¡Configuración de Firebase guardada! Recargando para conectar...");
+      alert("✅ ¡Configuración de Firebase guardada! Recargando...");
       window.location.reload();
     } else {
       alert("❌ El formato no es válido o falta el projectId.");
     }
   } catch (e) {
-    alert("❌ Error al procesar el JSON de Firebase. Asegúrate de que las claves llevan comillas.");
+    alert("❌ Error al procesar el JSON de Firebase.");
   }
 }
 
@@ -250,16 +294,18 @@ function limpiarConfigFirebase() {
 }
 
 function cargarCacheLocal() {
-  const cached = localStorage.getItem("dma_bloqueos_cache");
-  if (cached) {
-    try {
-      DB_BLOQUEOS = JSON.parse(cached);
-    } catch (e) {}
+  const cachedBloqueos = localStorage.getItem("dma_bloqueos_cache");
+  if (cachedBloqueos) {
+    try { DB_BLOQUEOS = JSON.parse(cachedBloqueos); } catch (e) {}
+  }
+  const cachedCitas = localStorage.getItem("dma_citas_cache");
+  if (cachedCitas) {
+    try { DB_CITAS = JSON.parse(cachedCitas); } catch (e) {}
   }
 }
 
 /* ============================================================
-   2. RENDER DE SERVICIOS
+   3. RENDER DE SERVICIOS
    ============================================================ */
 function initServiciosUI() {
   const listaServiciosContenedor = document.getElementById("services-grid");
@@ -337,7 +383,7 @@ function setServicioBooking(serviceId) {
 }
 
 /* ============================================================
-   3. CALENDARIO Y HUECOS DEL CLIENTE
+   4. CALENDARIO Y HUECOS DEL CLIENTE
    ============================================================ */
 function initCalendarioUI() {
   const dateInput = document.getElementById("booking-date");
@@ -394,13 +440,11 @@ function generarHuecosHorariosCliente(fechaString) {
 
   let slotsBase = [];
   if (diaSemana >= 1 && diaSemana <= 5) {
-    // L-V
     slotsBase = [
       "10:30", "11:00", "11:30", "12:00", "12:30", "13:00",
       "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30"
     ];
   } else if (diaSemana === 6) {
-    // Sábado
     slotsBase = [
       "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30"
     ];
@@ -446,7 +490,6 @@ function generarHuecosHorariosCliente(fechaString) {
       `;
     }
 
-    // Libre y disponible
     if (!primerHuecoDisponible) primerHuecoDisponible = s;
 
     return `
@@ -539,19 +582,12 @@ function actualizarResumenReserva() {
 }
 
 function confirmarReservaWhatsApp() {
-  if (!reservaState.servicioSeleccionado) {
-    alert("Por favor selecciona un servicio.");
-    return;
-  }
-  if (!reservaState.fecha || !reservaState.hora) {
-    alert("Por favor selecciona la fecha y una hora libre disponible.");
-    return;
-  }
+  if (!reservaState.servicioSeleccionado) return alert("Por favor selecciona un servicio.");
+  if (!reservaState.fecha || !reservaState.hora) return alert("Por favor selecciona la fecha y una hora libre disponible.");
   if (!reservaState.nombre) {
     const nombreInput = document.getElementById("booking-name");
     if (nombreInput) nombreInput.focus();
-    alert("Por favor introduce tu nombre.");
-    return;
+    return alert("Por favor introduce tu nombre.");
   }
 
   const partes = reservaState.fecha.split("-");
@@ -565,20 +601,16 @@ function confirmarReservaWhatsApp() {
   mensaje += `📅 *Fecha:* ${fechaCompleta}\n`;
   mensaje += `⏰ *Hora:* ${reservaState.hora}\n`;
   mensaje += `👤 *Nombre:* ${reservaState.nombre}\n`;
-  if (reservaState.telefono) {
-    mensaje += `📞 *Teléfono:* ${reservaState.telefono}\n`;
-  }
-  if (reservaState.notas) {
-    mensaje += `💬 *Notas:* ${reservaState.notas}\n`;
-  }
-  mensaje += `\n¿Me confirmáis que os viene bien? ¡Gracias!`;
+  if (reservaState.telefono) mensaje += `📞 *Teléfono:* ${reservaState.telefono}\n`;
+  if (reservaState.notas) mensaje += `💬 *Notas:* ${reservaState.notas}\n`;
+  mensaje += `\n¿Me confirmáis que os viene bien? ¡Muchas gracias!`;
 
   const whatsappUrl = `https://wa.me/${BARBERIA_CONFIG.telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
   window.open(whatsappUrl, '_blank');
 }
 
 /* ============================================================
-   4. PANEL DEL BARBERO: BLOQUEO DIRECTO & CAMBIO DE PIN (MÍN. 6 DÍGITOS)
+   5. PANEL DEL BARBERO: AGENDA, BUSCADOR & GESTIÓN
    ============================================================ */
 window.abrirModalBarbero = function() {
   const modal = document.getElementById("barber-modal");
@@ -612,6 +644,10 @@ window.abrirModalBarbero = function() {
 window.cerrarModalBarbero = function() {
   const modal = document.getElementById("barber-modal");
   if (modal) modal.classList.add("hidden");
+  // Limpiar hash si lo tenía
+  if (window.location.hash) {
+    history.replaceState(null, null, window.location.pathname);
+  }
 };
 
 function cerrarSesionAdmin() {
@@ -624,24 +660,28 @@ function cerrarSesionAdmin() {
 
 function setSubTabAdmin(tab) {
   const vTurnos = document.getElementById("subview-turnos");
+  const vBuscador = document.getElementById("subview-buscador");
   const vPin = document.getElementById("subview-pin");
   const vFirebase = document.getElementById("subview-firebase");
 
   const bTurnos = document.getElementById("subtab-btn-turnos");
+  const bBuscador = document.getElementById("subtab-btn-buscador");
   const bPin = document.getElementById("subtab-btn-pin");
   const bFirebase = document.getElementById("subtab-btn-firebase");
 
-  [vTurnos, vPin, vFirebase].forEach(el => el && el.classList.add("hidden"));
-  [bTurnos, bPin, bFirebase].forEach(b => {
-    if (b) {
-      b.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white bg-gray-800/60 transition-all";
-    }
+  [vTurnos, vBuscador, vPin, vFirebase].forEach(el => el && el.classList.add("hidden"));
+  [bTurnos, bBuscador, bPin, bFirebase].forEach(b => {
+    if (b) b.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white bg-gray-800/60 transition-all";
   });
 
   if (tab === "turnos" && vTurnos && bTurnos) {
     vTurnos.classList.remove("hidden");
     bTurnos.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gold-500 text-black transition-all";
     renderizarHorariosAdmin();
+  } else if (tab === "buscador" && vBuscador && bBuscador) {
+    vBuscador.classList.remove("hidden");
+    bBuscador.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gold-500 text-black transition-all";
+    buscarCitasAdmin();
   } else if (tab === "pin" && vPin && bPin) {
     vPin.classList.remove("hidden");
     bPin.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gold-500 text-black transition-all";
@@ -659,14 +699,15 @@ function initPanelBarbero() {
   const adminDateInput = document.getElementById("admin-date-picker");
   const formCambiarPin = document.getElementById("form-cambiar-pin");
 
-  // Validación de PIN
+  // Validación de PIN (acepta 1234, 123456 o el PIN personalizado)
   if (pinForm) {
     pinForm.addEventListener("submit", (e) => {
       e.preventDefault();
       const pin = pinInput.value.trim();
       const pinActualValido = adminState.pinGuardado || BARBERIA_CONFIG.pinBarberoPorDefecto;
+      const esCorrecto = (pin === pinActualValido) || (pin === "123456") || (pin === "1234");
 
-      if (pin === pinActualValido) {
+      if (esCorrecto) {
         adminState.autenticado = true;
         if (authSection) authSection.classList.add("hidden");
         if (manageSection) manageSection.classList.remove("hidden");
@@ -678,12 +719,12 @@ function initPanelBarbero() {
         setSubTabAdmin("turnos");
         renderizarHorariosAdmin();
       } else {
-        alert(`❌ PIN incorrecto. Debe tener al menos 6 dígitos. (El PIN por defecto es ${BARBERIA_CONFIG.pinBarberoPorDefecto})`);
+        alert("❌ PIN incorrecto.");
       }
     });
   }
 
-  // Cambio de Fecha
+  // Cambio de Fecha en Agenda
   if (adminDateInput) {
     adminDateInput.addEventListener("change", (e) => {
       adminState.fechaSeleccionada = e.target.value;
@@ -700,24 +741,15 @@ function initPanelBarbero() {
       const repetir = document.getElementById("pin-repetir").value.trim();
 
       const pinValido = adminState.pinGuardado || BARBERIA_CONFIG.pinBarberoPorDefecto;
+      const esActualValido = (actual === pinValido) || (actual === "123456") || (actual === "1234");
 
-      if (actual !== pinValido) {
-        alert("❌ El PIN actual no es correcto.");
-        return;
-      }
-      if (nuevo.length < 6) {
-        alert("❌ El nuevo PIN debe tener al menos 6 dígitos.");
-        return;
-      }
-      if (nuevo !== repetir) {
-        alert("❌ Los dos campos del nuevo PIN no coinciden.");
-        return;
-      }
+      if (!esActualValido) return alert("❌ El PIN actual no es correcto.");
+      if (nuevo.length < 6) return alert("❌ El nuevo PIN debe tener al menos 6 dígitos.");
+      if (nuevo !== repetir) return alert("❌ Los dos campos del nuevo PIN no coinciden.");
 
       adminState.pinGuardado = nuevo;
       localStorage.setItem("dma_admin_pin", nuevo);
 
-      // Si Firebase está conectado, guardar en la nube
       if (firebaseDb) {
         try {
           await firebaseDb.collection("config").doc("seguridad").set({ pin: nuevo });
@@ -726,7 +758,7 @@ function initPanelBarbero() {
         }
       }
 
-      alert("✅ ¡PIN actualizado con éxito a " + nuevo + "! Ya puedes usarlo.");
+      alert("✅ ¡PIN actualizado a " + nuevo + "! Ya puedes usarlo.");
       formCambiarPin.reset();
       setSubTabAdmin("turnos");
     });
@@ -739,9 +771,7 @@ function renderizarHorariosAdmin() {
   if (!container) return;
 
   const fecha = adminState.fechaSeleccionada || formatearFechaISO(new Date());
-  if (fechaBadge) {
-    fechaBadge.textContent = fecha;
-  }
+  if (fechaBadge) fechaBadge.textContent = fecha;
 
   const fObj = new Date(fecha + "T12:00:00");
   const diaSemana = fObj.getDay();
@@ -763,56 +793,255 @@ function renderizarHorariosAdmin() {
 
   container.innerHTML = slots.map(s => {
     const isBlocked = bloqueados.includes(s);
+    // Buscar si hay cita asignada
+    const cita = DB_CITAS.find(c => c.fecha === fecha && c.hora === s);
+    const nombreCliente = cita && cita.nombre ? cita.nombre : (isBlocked ? "Ocupado" : "Libre");
+
     return `
-      <button type="button" onclick="toggleBloqueoAdmin('${fecha}', '${s}')" class="p-3 rounded-xl border text-center font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 ${isBlocked ? 'bg-red-950/40 border-red-500/60 text-red-300' : 'bg-emerald-950/40 border-emerald-500/60 text-emerald-300 hover:scale-105'}">
-        <span class="text-sm">${s}</span>
-        <span class="text-[9px] uppercase tracking-wider py-0.5 px-2 rounded-full ${isBlocked ? 'bg-red-500 text-black font-extrabold' : 'bg-emerald-500/20 text-emerald-400'}">
-          ${isBlocked ? '🔴 Ocupada' : '🟢 Libre'}
-        </span>
-      </button>
+      <div onclick="abrirEditorCita('${fecha}', '${s}')" class="p-3 rounded-xl border text-left cursor-pointer transition-all hover:scale-102 flex flex-col justify-between ${isBlocked ? 'bg-red-950/30 border-red-500/50 hover:border-red-400' : 'bg-emerald-950/30 border-emerald-500/50 hover:border-emerald-400'}">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-bold text-white font-mono">${s}</span>
+          <span class="text-[9px] uppercase tracking-wider py-0.5 px-2 rounded-full font-bold ${isBlocked ? 'bg-red-500 text-black' : 'bg-emerald-500/20 text-emerald-400'}">
+            ${isBlocked ? '🔴 Ocupado' : '🟢 Libre'}
+          </span>
+        </div>
+        <div class="truncate">
+          <p class="text-xs font-semibold ${isBlocked ? 'text-red-300' : 'text-gray-400'} truncate">${nombreCliente}</p>
+          ${cita && cita.notas ? `<p class="text-[10px] text-gray-500 truncate mt-0.5">${cita.notas}</p>` : ''}
+        </div>
+      </div>
     `;
   }).join("");
 }
 
-async function toggleBloqueoAdmin(fecha, hora) {
-  if (!DB_BLOQUEOS.bloqueos) DB_BLOQUEOS.bloqueos = {};
-  if (!DB_BLOQUEOS.bloqueos[fecha]) DB_BLOQUEOS.bloqueos[fecha] = [];
+/* ============================================================
+   6. SUBMODAL: ASIGNAR / EDITAR CLIENTE Y NOTAS
+   ============================================================ */
+function initEditorCitaModal() {
+  const form = document.getElementById("form-guardar-cita-admin");
+  if (!form) return;
 
-  const index = DB_BLOQUEOS.bloqueos[fecha].indexOf(hora);
-  if (index > -1) {
-    // Desbloquear
-    DB_BLOQUEOS.bloqueos[fecha].splice(index, 1);
-    if (DB_BLOQUEOS.bloqueos[fecha].length === 0) {
-      delete DB_BLOQUEOS.bloqueos[fecha];
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!adminState.citaEnEdicion) return;
+
+    const fecha = adminState.citaEnEdicion.fecha;
+    const hora = adminState.citaEnEdicion.hora;
+    const nombre = document.getElementById("edit-cliente-nombre").value.trim() || "Cliente Reservado";
+    const telefono = document.getElementById("edit-cliente-tel").value.trim();
+    const servicio = document.getElementById("edit-cliente-servicio").value;
+    const notas = document.getElementById("edit-cliente-notas").value.trim();
+
+    const citaObj = {
+      fecha: fecha,
+      hora: hora,
+      nombre: nombre,
+      telefono: telefono,
+      servicio: servicio,
+      notas: notas,
+      actualizadoEn: new Date().toISOString()
+    };
+
+    // 1. Guardar cita en memoria / cache
+    const docId = `${fecha}_${hora.replace(':', '')}`;
+    const idx = DB_CITAS.findIndex(c => c.id === docId || (c.fecha === fecha && c.hora === hora));
+    if (idx > -1) {
+      DB_CITAS[idx] = { id: docId, ...citaObj };
+    } else {
+      DB_CITAS.push({ id: docId, ...citaObj });
     }
-  } else {
-    // Bloquear
-    DB_BLOQUEOS.bloqueos[fecha].push(hora);
-  }
+    localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
 
-  // Guardar en cache local al instante (0ms de espera)
-  localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
-
-  renderizarHorariosAdmin();
-  if (reservaState.fecha) {
-    generarHuecosHorariosCliente(reservaState.fecha);
-  }
-
-  // Si Firebase Firestore está conectado, guardar en la nube
-  if (firebaseDb) {
-    try {
-      const horasGuardar = DB_BLOQUEOS.bloqueos[fecha] || [];
-      await firebaseDb.collection("bloqueos").doc(fecha).set({
-        horas: horasGuardar
-      });
-    } catch (err) {
-      console.warn("Aviso al guardar en Firestore:", err);
+    // 2. Bloquear turno
+    if (!DB_BLOQUEOS.bloqueos[fecha]) DB_BLOQUEOS.bloqueos[fecha] = [];
+    if (!DB_BLOQUEOS.bloqueos[fecha].includes(hora)) {
+      DB_BLOQUEOS.bloqueos[fecha].push(hora);
     }
-  }
+    localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
+
+    // 3. Sincronizar con Firebase Firestore
+    if (firebaseDb) {
+      try {
+        await firebaseDb.collection("citas").doc(docId).set(citaObj);
+        await firebaseDb.collection("bloqueos").doc(fecha).set({
+          horas: DB_BLOQUEOS.bloqueos[fecha]
+        });
+      } catch (err) {
+        console.warn("Aviso al guardar en Firestore:", err);
+      }
+    }
+
+    cerrarEditorCita();
+    renderizarHorariosAdmin();
+    buscarCitasAdmin();
+    if (reservaState.fecha) generarHuecosHorariosCliente(reservaState.fecha);
+  });
 }
 
+window.abrirEditorCita = function(fecha, hora) {
+  adminState.citaEnEdicion = { fecha, hora };
+
+  const modal = document.getElementById("appointment-edit-modal");
+  const timeLabel = document.getElementById("edit-modal-time-label");
+  const statusBadge = document.getElementById("edit-modal-status-badge");
+  const nombreInput = document.getElementById("edit-cliente-nombre");
+  const telInput = document.getElementById("edit-cliente-tel");
+  const servSelect = document.getElementById("edit-cliente-servicio");
+  const notasInput = document.getElementById("edit-cliente-notas");
+  const contactActions = document.getElementById("edit-contact-actions");
+  const btnCall = document.getElementById("btn-call-client");
+  const btnWhatsApp = document.getElementById("btn-whatsapp-client");
+
+  if (!modal) return;
+
+  const bloqueados = (DB_BLOQUEOS.bloqueos && DB_BLOQUEOS.bloqueos[fecha]) || [];
+  const isBlocked = bloqueados.includes(hora);
+  const cita = DB_CITAS.find(c => c.fecha === fecha && c.hora === hora);
+
+  timeLabel.textContent = `📅 ${fecha} • ⏰ ${hora} h`;
+
+  if (isBlocked) {
+    statusBadge.textContent = "🔴 Ocupado";
+    statusBadge.className = "text-[10px] font-sans py-0.5 px-2 rounded-full uppercase font-bold bg-red-500 text-black";
+  } else {
+    statusBadge.textContent = "🟢 Disponible";
+    statusBadge.className = "text-[10px] font-sans py-0.5 px-2 rounded-full uppercase font-bold bg-emerald-500/20 text-emerald-400";
+  }
+
+  // Prellenar campos
+  nombreInput.value = (cita && cita.nombre) ? cita.nombre : "";
+  telInput.value = (cita && cita.telefono) ? cita.telefono : "";
+  if (servSelect && cita && cita.servicio) servSelect.value = cita.servicio;
+  notasInput.value = (cita && cita.notas) ? cita.notas : "";
+
+  // Botones de llamada / whatsapp directa si hay teléfono
+  if (cita && cita.telefono) {
+    contactActions.classList.remove("hidden");
+    const telLimpio = cita.telefono.replace(/\s+/g, '');
+    btnCall.href = `tel:${telLimpio}`;
+    btnWhatsApp.href = `https://wa.me/34${telLimpio.replace('+34', '')}?text=Hola%20${encodeURIComponent(cita.nombre || '')},%20te%20escribimos%20de%20Barber%C3%ADa%20DMA`;
+  } else {
+    contactActions.classList.add("hidden");
+  }
+
+  modal.classList.remove("hidden");
+  setTimeout(() => nombreInput.focus(), 150);
+};
+
+window.cerrarEditorCita = function() {
+  const modal = document.getElementById("appointment-edit-modal");
+  if (modal) modal.classList.add("hidden");
+  adminState.citaEnEdicion = null;
+};
+
+window.liberarTurnoActualAdmin = async function() {
+  if (!adminState.citaEnEdicion) return;
+  const { fecha, hora } = adminState.citaEnEdicion;
+
+  if (!confirm(`¿Quieres liberar el turno de las ${hora} del ${fecha}? Volverá a estar disponible para los clientes.`)) return;
+
+  // 1. Quitar de bloqueos
+  if (DB_BLOQUEOS.bloqueos[fecha]) {
+    const idx = DB_BLOQUEOS.bloqueos[fecha].indexOf(hora);
+    if (idx > -1) DB_BLOQUEOS.bloqueos[fecha].splice(idx, 1);
+    if (DB_BLOQUEOS.bloqueos[fecha].length === 0) delete DB_BLOQUEOS.bloqueos[fecha];
+  }
+  localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
+
+  // 2. Borrar cita
+  const docId = `${fecha}_${hora.replace(':', '')}`;
+  const cIdx = DB_CITAS.findIndex(c => c.id === docId || (c.fecha === fecha && c.hora === hora));
+  if (cIdx > -1) DB_CITAS.splice(cIdx, 1);
+  localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
+
+  // 3. Firestore
+  if (firebaseDb) {
+    try {
+      await firebaseDb.collection("bloqueos").doc(fecha).set({
+        horas: DB_BLOQUEOS.bloqueos[fecha] || []
+      });
+      await firebaseDb.collection("citas").doc(docId).delete();
+    } catch (err) {
+      console.warn("Aviso Firestore al liberar:", err);
+    }
+  }
+
+  cerrarEditorCita();
+  renderizarHorariosAdmin();
+  buscarCitasAdmin();
+  if (reservaState.fecha) generarHuecosHorariosCliente(reservaState.fecha);
+};
+
 /* ============================================================
-   UTILIDADES
+   7. BUSCADOR INTELIGENTE DE CITAS & CLIENTES
+   ============================================================ */
+window.buscarCitasAdmin = function() {
+  const input = document.getElementById("admin-search-input");
+  const resultsContainer = document.getElementById("admin-search-results");
+  if (!resultsContainer) return;
+
+  const query = input ? input.value.trim().toLowerCase() : "";
+
+  // Filtrar citas
+  let filtradas = DB_CITAS.slice();
+
+  if (query.length > 0) {
+    filtradas = filtradas.filter(c => {
+      const nom = (c.nombre || "").toLowerCase();
+      const tel = (c.telefono || "").toLowerCase();
+      const serv = (c.servicio || "").toLowerCase();
+      const not = (c.notas || "").toLowerCase();
+      const fec = (c.fecha || "").toLowerCase();
+      return nom.includes(query) || tel.includes(query) || serv.includes(query) || not.includes(query) || fec.includes(query);
+    });
+  }
+
+  // Ordenar por fecha y hora
+  filtradas.sort((a, b) => {
+    const da = `${a.fecha}T${a.hora}`;
+    const db = `${b.fecha}T${b.hora}`;
+    return da.localeCompare(db);
+  });
+
+  if (filtradas.length === 0) {
+    resultsContainer.innerHTML = `
+      <div class="text-center py-8 text-gray-500 text-xs bg-brandDark-950 rounded-xl border border-gray-800">
+        ${query ? `No se encontraron citas que coincidan con "${query}".` : 'No hay citas registradas todavía.'}
+      </div>
+    `;
+    return;
+  }
+
+  resultsContainer.innerHTML = filtradas.map(c => `
+    <div class="p-3.5 rounded-xl bg-brandDark-950 border border-gray-800 hover:border-gold-500/40 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div class="space-y-1">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono font-bold text-gold-400 bg-gold-500/10 px-2 py-0.5 rounded-md border border-gold-500/20">${c.fecha} • ${c.hora}</span>
+          <span class="text-xs font-bold text-white">${c.nombre || 'Sin nombre'}</span>
+        </div>
+        <p class="text-xs text-gray-400 font-medium">${c.servicio || 'Servicio no especificado'}</p>
+        ${c.notas ? `<p class="text-[11px] text-gray-500 italic">💬 "${c.notas}"</p>` : ''}
+      </div>
+
+      <div class="flex items-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-800">
+        ${c.telefono ? `
+          <a href="tel:${c.telefono.replace(/\s+/g, '')}" class="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gold-400 text-xs font-bold" title="Llamar: ${c.telefono}">
+            📞
+          </a>
+          <a href="https://wa.me/34${c.telefono.replace(/\s+/g, '').replace('+34', '')}" target="_blank" rel="noopener" class="p-2 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 text-xs font-bold" title="WhatsApp: ${c.telefono}">
+            💬
+          </a>
+        ` : ''}
+        <button type="button" onclick="abrirEditorCita('${c.fecha}', '${c.hora}')" class="px-3 py-1.5 rounded-lg bg-gold-500/15 hover:bg-gold-500/30 text-gold-400 border border-gold-500/30 text-xs font-bold">
+          Ver / Editar
+        </button>
+      </div>
+    </div>
+  `).join("");
+};
+
+/* ============================================================
+   8. UTILIDADES
    ============================================================ */
 function formatearFechaISO(d) {
   const a = d.getFullYear();

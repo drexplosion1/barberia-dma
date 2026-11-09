@@ -1,6 +1,6 @@
 /**
  * Barbería DMA - Oviedo
- * Motor interactivo de citas (Zero Server con GitHub como Base de Datos)
+ * Motor de Citas & Sincronización en Tiempo Real (Firebase / Local)
  */
 
 const BARBERIA_CONFIG = {
@@ -9,8 +9,16 @@ const BARBERIA_CONFIG = {
   telefonoLimpio: "34610245360",
   direccion: "C. Ignacio Herrero Garralda, 1, 33011 Oviedo, Asturias",
   googleMapsUrl: "https://maps.google.com/?q=Barberia+DMA+Oviedo+Ignacio+Herrero+Garralda+1",
-  githubRepo: "drexplosion1/barberia-dma",
-  pinBarberoPorDefecto: "1234",
+  pinBarberoPorDefecto: "123456", // Mínimo 6 dígitos
+  // Configuración oficial de Firebase Firestore de Barbería DMA
+  firebaseConfig: {
+    apiKey: "AIzaSyDuh_jztJVGXrJRyzbXcusIvRJq-fpkc4g",
+    authDomain: "barberia-dma.firebaseapp.com",
+    projectId: "barberia-dma",
+    storageBucket: "barberia-dma.firebasestorage.app",
+    messagingSenderId: "980211881562",
+    appId: "1:980211881562:web:fa7c4f698e4614cf332a63"
+  },
   horarios: {
     semana: [
       { inicio: "10:30", fin: "13:30" },
@@ -73,14 +81,12 @@ const BARBERIA_CONFIG = {
   ]
 };
 
-// Base de datos de bloqueos (cargada desde data/bloqueos.json o localStorage)
+// Base de datos de bloqueos en memoria y cache
 let DB_BLOQUEOS = {
-  bloqueos: {}, // {"2026-11-10": ["11:30", "16:00"]}
-  citas: []
+  bloqueos: {} // {"2026-11-10": ["11:30", "16:00"]}
 };
-let DB_FILE_SHA = null;
 
-// Estado del formulario de reserva del cliente
+// Estado del cliente
 let reservaState = {
   servicioSeleccionado: BARBERIA_CONFIG.servicios[0],
   fecha: "",
@@ -90,105 +96,170 @@ let reservaState = {
   notas: ""
 };
 
-// Estado del Panel Barbero
+// Estado de Administración
 let adminState = {
   autenticado: false,
   fechaSeleccionada: "",
-  githubToken: localStorage.getItem("dma_github_token") || "",
   pinGuardado: localStorage.getItem("dma_admin_pin") || BARBERIA_CONFIG.pinBarberoPorDefecto
 };
 
-// Inicialización
-document.addEventListener("DOMContentLoaded", async () => {
-  actualizarEstadoApertura();
-  setInterval(actualizarEstadoApertura, 60000);
+// Instancia de Firebase Firestore
+let firebaseDb = null;
 
-  initServiciosUI();
-  await cargarBloqueosDesdeGitHub();
-  initCalendarioUI();
-  initFormularioReserva();
-  initPanelBarbero();
-  initMobileMenu();
-  initFaqAccordion();
+// Inicialización limpia
+document.addEventListener("DOMContentLoaded", () => {
+  try {
+    cargarCacheLocal();
+    initServiciosUI();
+    initCalendarioUI();
+    initFormularioReserva();
+    initPanelBarbero();
+    initMobileMenu();
+    initFaqAccordion();
+    initFirebase();
+  } catch (err) {
+    console.error("Error al iniciar:", err);
+  }
 });
 
 /* ============================================================
-   1. ESTADO DE APERTURA EN TIEMPO REAL
+   1. FIREBASE FIRESTORE EN TIEMPO REAL (SIN TOKENS)
    ============================================================ */
-function actualizarEstadoApertura() {
-  const badgeElement = document.getElementById("status-badge");
-  if (!badgeElement) return;
+function initFirebase() {
+  const statusBadge = document.getElementById("firebase-status-badge");
+  const configTextarea = document.getElementById("firebase-config-input");
 
-  const ahora = new Date();
-  const diaSemana = ahora.getDay(); // 0 = Dom, 1 = Lun, ..., 6 = Sáb
-  const horas = ahora.getHours();
-  const minutos = ahora.getMinutes();
-  const horaActualDecimal = horas + minutos / 60;
+  let configToUse = null;
+  const savedConfigStr = localStorage.getItem("dma_firebase_config");
 
-  let estaAbierto = false;
-  let mensajeExtra = "";
-
-  if (diaSemana >= 1 && diaSemana <= 5) {
-    // L-V: 10:30-13:30 y 15:00-20:00
-    if ((horaActualDecimal >= 10.5 && horaActualDecimal < 13.5) || (horaActualDecimal >= 15.0 && horaActualDecimal < 20.0)) {
-      estaAbierto = true;
-      mensajeExtra = horaActualDecimal < 13.5 ? "• Cierra a las 13:30 (reabre 15:00)" : "• Cierra a las 20:00";
-    } else if (horaActualDecimal < 10.5) {
-      mensajeExtra = "• Abre hoy a las 10:30";
-    } else if (horaActualDecimal >= 13.5 && horaActualDecimal < 15.0) {
-      mensajeExtra = "• Pausa mediodía (abre 15:00)";
-    } else {
-      mensajeExtra = diaSemana === 5 ? "• Abre mañana sábado a las 10:00" : "• Abre mañana a las 10:30";
+  if (savedConfigStr) {
+    try {
+      configToUse = JSON.parse(savedConfigStr);
+    } catch (e) {
+      console.warn("Configuración guardada de Firebase no válida");
     }
-  } else if (diaSemana === 6) {
-    // Sábado: 10:00 - 14:00
-    if (horaActualDecimal >= 10.0 && horaActualDecimal < 14.0) {
-      estaAbierto = true;
-      mensajeExtra = "• Cierra a las 14:00";
-    } else if (horaActualDecimal < 10.0) {
-      mensajeExtra = "• Abre hoy a las 10:00";
-    } else {
-      mensajeExtra = "• Cerrado hasta el lunes a las 10:30";
-    }
-  } else {
-    mensajeExtra = "• Cerrado por descanso (Abre lunes a las 10:30)";
+  } else if (BARBERIA_CONFIG.firebaseConfig && BARBERIA_CONFIG.firebaseConfig.projectId) {
+    configToUse = BARBERIA_CONFIG.firebaseConfig;
   }
 
-  if (estaAbierto) {
-    badgeElement.className = "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30";
-    badgeElement.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 pulse-indicator"></span> <span>ABIERTO AHORA</span> <span class="text-xs text-gray-300 font-normal hidden sm:inline">${mensajeExtra}</span>`;
+  if (configTextarea && configToUse) {
+    configTextarea.value = JSON.stringify(configToUse, null, 2);
+  }
+
+  if (typeof firebase !== "undefined" && configToUse && configToUse.projectId) {
+    try {
+      if (!firebase.apps.length) {
+        firebase.initializeApp(configToUse);
+      }
+      firebaseDb = firebase.firestore();
+
+      if (statusBadge) {
+        statusBadge.innerHTML = `
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="text-emerald-400 font-medium">Conectado a Firebase Firestore (Tiempo Real)</span>
+        `;
+      }
+
+      // Escuchar bloqueos en tiempo real
+      firebaseDb.collection("bloqueos").onSnapshot((snapshot) => {
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          DB_BLOQUEOS.bloqueos[doc.id] = data.horas || [];
+        });
+        localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
+
+        if (reservaState.fecha) {
+          generarHuecosHorariosCliente(reservaState.fecha);
+        }
+        if (adminState.autenticado) {
+          renderizarHorariosAdmin();
+        }
+      }, (err) => {
+        console.warn("Aviso Firestore bloqueos:", err);
+      });
+
+      // Escuchar cambios de PIN en tiempo real
+      firebaseDb.collection("config").doc("seguridad").onSnapshot((doc) => {
+        if (doc.exists) {
+          const data = doc.data();
+          if (data.pin && data.pin.length >= 6) {
+            adminState.pinGuardado = data.pin;
+            localStorage.setItem("dma_admin_pin", data.pin);
+          }
+        }
+      }, (err) => {
+        console.warn("Aviso Firestore PIN:", err);
+      });
+
+    } catch (err) {
+      console.error("Error al inicializar Firebase:", err);
+      mostrarEstadoLocal();
+    }
   } else {
-    badgeElement.className = "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30";
-    badgeElement.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span> <span>CERRADO AHORA</span> <span class="text-xs text-gray-400 font-normal hidden sm:inline">${mensajeExtra}</span>`;
+    mostrarEstadoLocal();
   }
 }
 
-/* ============================================================
-   2. GITHUB COMO BASE DE DATOS (CARGA Y GUARDADO DE BLOQUEOS)
-   ============================================================ */
-async function cargarBloqueosDesdeGitHub() {
+function mostrarEstadoLocal() {
+  const statusBadge = document.getElementById("firebase-status-badge");
+  if (statusBadge) {
+    statusBadge.innerHTML = `
+      <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+      <span class="text-amber-400 font-medium">Modo Local Activo (Pega tu config de Firebase en la pestaña Firebase)</span>
+    `;
+  }
+}
+
+function guardarConfigFirebase() {
+  const input = document.getElementById("firebase-config-input");
+  if (!input) return;
+
+  const raw = input.value.trim();
+  if (!raw) {
+    alert("Por favor introduce la configuración de Firebase.");
+    return;
+  }
+
   try {
-    // Intentar leer primero con timestamp para evitar cache
-    const url = `data/bloqueos.json?nocache=${Date.now()}`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const datos = await res.json();
-      DB_BLOQUEOS = datos || { bloqueos: {}, citas: [] };
-      localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
+    let parsed = null;
+    if (raw.startsWith("{")) {
+      parsed = JSON.parse(raw);
     } else {
-      // Fallback a localStorage
-      const cached = localStorage.getItem("dma_bloqueos_cache");
-      if (cached) DB_BLOQUEOS = JSON.parse(cached);
+      // Intenta extraer claves si pegaron const firebaseConfig = {...}
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) parsed = JSON.parse(match[0]);
     }
-  } catch (err) {
-    console.warn("Aviso al cargar data/bloqueos.json, usando cache local", err);
-    const cached = localStorage.getItem("dma_bloqueos_cache");
-    if (cached) DB_BLOQUEOS = JSON.parse(cached);
+
+    if (parsed && parsed.projectId) {
+      localStorage.setItem("dma_firebase_config", JSON.stringify(parsed));
+      alert("✅ ¡Configuración de Firebase guardada! Recargando para conectar...");
+      window.location.reload();
+    } else {
+      alert("❌ El formato no es válido o falta el projectId.");
+    }
+  } catch (e) {
+    alert("❌ Error al procesar el JSON de Firebase. Asegúrate de que las claves llevan comillas.");
+  }
+}
+
+function limpiarConfigFirebase() {
+  if (confirm("¿Quieres eliminar la configuración de Firebase y volver al modo local?")) {
+    localStorage.removeItem("dma_firebase_config");
+    window.location.reload();
+  }
+}
+
+function cargarCacheLocal() {
+  const cached = localStorage.getItem("dma_bloqueos_cache");
+  if (cached) {
+    try {
+      DB_BLOQUEOS = JSON.parse(cached);
+    } catch (e) {}
   }
 }
 
 /* ============================================================
-   3. RENDER DE SERVICIOS
+   2. RENDER DE SERVICIOS
    ============================================================ */
 function initServiciosUI() {
   const listaServiciosContenedor = document.getElementById("services-grid");
@@ -266,7 +337,7 @@ function setServicioBooking(serviceId) {
 }
 
 /* ============================================================
-   4. CALENDARIO Y HUECOS LIBRES/OCUPADOS DEL CLIENTE
+   3. CALENDARIO Y HUECOS DEL CLIENTE
    ============================================================ */
 function initCalendarioUI() {
   const dateInput = document.getElementById("booking-date");
@@ -282,7 +353,6 @@ function initCalendarioUI() {
 
   let fechaInicial = fechaMin;
   if (hoy.getDay() === 0) {
-    // Si hoy es domingo, sugerir lunes
     const proxLunes = new Date();
     proxLunes.setDate(hoy.getDate() + 1);
     fechaInicial = formatearFechaISO(proxLunes);
@@ -339,10 +409,7 @@ function generarHuecosHorariosCliente(fechaString) {
     return;
   }
 
-  // Comprobar qué horas están bloqueadas por el barbero
   const bloqueadosDelDia = (DB_BLOQUEOS.bloqueos && DB_BLOQUEOS.bloqueos[fechaString]) || [];
-
-  // Filtrar horas ya pasadas si la fecha es hoy
   const hoyStr = formatearFechaISO(new Date());
   const ahora = new Date();
   const horaActual = ahora.getHours();
@@ -511,69 +578,157 @@ function confirmarReservaWhatsApp() {
 }
 
 /* ============================================================
-   5. PANEL DEL BARBERO: BLOQUEO DIRECTO DE HUECOS CON 1 CLIC
+   4. PANEL DEL BARBERO: BLOQUEO DIRECTO & CAMBIO DE PIN (MÍN. 6 DÍGITOS)
    ============================================================ */
-function initPanelBarbero() {
+window.abrirModalBarbero = function() {
   const modal = document.getElementById("barber-modal");
-  const openBtns = document.querySelectorAll(".btn-open-barber-panel");
-  const closeBtn = document.getElementById("btn-close-barber-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+
+  const authSection = document.getElementById("barber-auth-section");
+  const manageSection = document.getElementById("barber-manage-section");
+  const pinInput = document.getElementById("barber-pin-input");
+  const adminDateInput = document.getElementById("admin-date-picker");
+
+  if (adminState.autenticado) {
+    if (authSection) authSection.classList.add("hidden");
+    if (manageSection) manageSection.classList.remove("hidden");
+    if (!adminState.fechaSeleccionada) {
+      adminState.fechaSeleccionada = formatearFechaISO(new Date());
+    }
+    if (adminDateInput) adminDateInput.value = adminState.fechaSeleccionada;
+    setSubTabAdmin("turnos");
+    renderizarHorariosAdmin();
+  } else {
+    if (authSection) authSection.classList.remove("hidden");
+    if (manageSection) manageSection.classList.add("hidden");
+    if (pinInput) {
+      pinInput.value = "";
+      setTimeout(() => pinInput.focus(), 100);
+    }
+  }
+};
+
+window.cerrarModalBarbero = function() {
+  const modal = document.getElementById("barber-modal");
+  if (modal) modal.classList.add("hidden");
+};
+
+function cerrarSesionAdmin() {
+  adminState.autenticado = false;
+  const authSection = document.getElementById("barber-auth-section");
+  const manageSection = document.getElementById("barber-manage-section");
+  if (authSection) authSection.classList.remove("hidden");
+  if (manageSection) manageSection.classList.add("hidden");
+}
+
+function setSubTabAdmin(tab) {
+  const vTurnos = document.getElementById("subview-turnos");
+  const vPin = document.getElementById("subview-pin");
+  const vFirebase = document.getElementById("subview-firebase");
+
+  const bTurnos = document.getElementById("subtab-btn-turnos");
+  const bPin = document.getElementById("subtab-btn-pin");
+  const bFirebase = document.getElementById("subtab-btn-firebase");
+
+  [vTurnos, vPin, vFirebase].forEach(el => el && el.classList.add("hidden"));
+  [bTurnos, bPin, bFirebase].forEach(b => {
+    if (b) {
+      b.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white bg-gray-800/60 transition-all";
+    }
+  });
+
+  if (tab === "turnos" && vTurnos && bTurnos) {
+    vTurnos.classList.remove("hidden");
+    bTurnos.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gold-500 text-black transition-all";
+    renderizarHorariosAdmin();
+  } else if (tab === "pin" && vPin && bPin) {
+    vPin.classList.remove("hidden");
+    bPin.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gold-500 text-black transition-all";
+  } else if (tab === "firebase" && vFirebase && bFirebase) {
+    vFirebase.classList.remove("hidden");
+    bFirebase.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gold-500 text-black transition-all";
+  }
+}
+
+function initPanelBarbero() {
   const pinForm = document.getElementById("barber-pin-form");
   const pinInput = document.getElementById("barber-pin-input");
   const authSection = document.getElementById("barber-auth-section");
   const manageSection = document.getElementById("barber-manage-section");
   const adminDateInput = document.getElementById("admin-date-picker");
-
-  if (!modal) return;
-
-  openBtns.forEach(b => {
-    b.addEventListener("click", () => {
-      modal.classList.remove("hidden");
-      if (adminState.autenticado) {
-        authSection.classList.add("hidden");
-        manageSection.classList.remove("hidden");
-        renderizarHorariosAdmin();
-      } else {
-        authSection.classList.remove("hidden");
-        manageSection.classList.add("hidden");
-        if (pinInput) {
-          pinInput.value = "";
-          pinInput.focus();
-        }
-      }
-    });
-  });
-
-  if (closeBtn) {
-    closeBtn.addEventListener("click", () => {
-      modal.classList.add("hidden");
-    });
-  }
+  const formCambiarPin = document.getElementById("form-cambiar-pin");
 
   // Validación de PIN
   if (pinForm) {
     pinForm.addEventListener("submit", (e) => {
       e.preventDefault();
       const pin = pinInput.value.trim();
-      if (pin === adminState.pinGuardado || pin === "1234") {
+      const pinActualValido = adminState.pinGuardado || BARBERIA_CONFIG.pinBarberoPorDefecto;
+
+      if (pin === pinActualValido) {
         adminState.autenticado = true;
-        authSection.classList.add("hidden");
-        manageSection.classList.remove("hidden");
+        if (authSection) authSection.classList.add("hidden");
+        if (manageSection) manageSection.classList.remove("hidden");
 
         const hoy = new Date();
         adminState.fechaSeleccionada = formatearFechaISO(hoy);
         if (adminDateInput) adminDateInput.value = adminState.fechaSeleccionada;
 
+        setSubTabAdmin("turnos");
         renderizarHorariosAdmin();
       } else {
-        alert("❌ PIN incorrecto. (El PIN por defecto es 1234)");
+        alert(`❌ PIN incorrecto. Debe tener al menos 6 dígitos. (El PIN por defecto es ${BARBERIA_CONFIG.pinBarberoPorDefecto})`);
       }
     });
   }
 
+  // Cambio de Fecha
   if (adminDateInput) {
     adminDateInput.addEventListener("change", (e) => {
       adminState.fechaSeleccionada = e.target.value;
       renderizarHorariosAdmin();
+    });
+  }
+
+  // Formulario Cambiar PIN
+  if (formCambiarPin) {
+    formCambiarPin.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const actual = document.getElementById("pin-actual").value.trim();
+      const nuevo = document.getElementById("pin-nuevo").value.trim();
+      const repetir = document.getElementById("pin-repetir").value.trim();
+
+      const pinValido = adminState.pinGuardado || BARBERIA_CONFIG.pinBarberoPorDefecto;
+
+      if (actual !== pinValido) {
+        alert("❌ El PIN actual no es correcto.");
+        return;
+      }
+      if (nuevo.length < 6) {
+        alert("❌ El nuevo PIN debe tener al menos 6 dígitos.");
+        return;
+      }
+      if (nuevo !== repetir) {
+        alert("❌ Los dos campos del nuevo PIN no coinciden.");
+        return;
+      }
+
+      adminState.pinGuardado = nuevo;
+      localStorage.setItem("dma_admin_pin", nuevo);
+
+      // Si Firebase está conectado, guardar en la nube
+      if (firebaseDb) {
+        try {
+          await firebaseDb.collection("config").doc("seguridad").set({ pin: nuevo });
+        } catch (err) {
+          console.warn("Aviso al guardar PIN en Firebase:", err);
+        }
+      }
+
+      alert("✅ ¡PIN actualizado con éxito a " + nuevo + "! Ya puedes usarlo.");
+      formCambiarPin.reset();
+      setSubTabAdmin("turnos");
     });
   }
 }
@@ -619,7 +774,7 @@ function renderizarHorariosAdmin() {
   }).join("");
 }
 
-function toggleBloqueoAdmin(fecha, hora) {
+async function toggleBloqueoAdmin(fecha, hora) {
   if (!DB_BLOQUEOS.bloqueos) DB_BLOQUEOS.bloqueos = {};
   if (!DB_BLOQUEOS.bloqueos[fecha]) DB_BLOQUEOS.bloqueos[fecha] = [];
 
@@ -635,104 +790,25 @@ function toggleBloqueoAdmin(fecha, hora) {
     DB_BLOQUEOS.bloqueos[fecha].push(hora);
   }
 
-  // Guardar en cache local de inmediato
+  // Guardar en cache local al instante (0ms de espera)
   localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
 
-  // Refrescar vistas
   renderizarHorariosAdmin();
   if (reservaState.fecha) {
     generarHuecosHorariosCliente(reservaState.fecha);
   }
-}
 
-// Guardar en GitHub (Commit automático a data/bloqueos.json)
-async function guardarCambiosEnGitHub() {
-  const token = adminState.githubToken || localStorage.getItem("dma_github_token");
-  const statusEl = document.getElementById("admin-save-status");
-
-  if (!token) {
-    const nuevoToken = prompt(
-      "Para sincronizar con GitHub automáticamente, pega tu GitHub Personal Access Token:\n(Si aún no tienes uno, puedes generarlo gratis en github.com/settings/tokens o usar el botón de abajo para copiar el archivo)"
-    );
-    if (nuevoToken && nuevoToken.trim().length > 0) {
-      adminState.githubToken = nuevoToken.trim();
-      localStorage.setItem("dma_github_token", adminState.githubToken);
-    } else {
-      return;
+  // Si Firebase Firestore está conectado, guardar en la nube
+  if (firebaseDb) {
+    try {
+      const horasGuardar = DB_BLOQUEOS.bloqueos[fecha] || [];
+      await firebaseDb.collection("bloqueos").doc(fecha).set({
+        horas: horasGuardar
+      });
+    } catch (err) {
+      console.warn("Aviso al guardar en Firestore:", err);
     }
   }
-
-  if (statusEl) {
-    statusEl.textContent = "⏳ Guardando en GitHub...";
-    statusEl.className = "text-xs text-amber-400 font-semibold";
-  }
-
-  try {
-    const repo = BARBERIA_CONFIG.githubRepo;
-    const path = "data/bloqueos.json";
-    const apiUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
-
-    // Obtener SHA actual del archivo
-    let sha = DB_FILE_SHA;
-    const getRes = await fetch(apiUrl, {
-      headers: {
-        "Authorization": `Bearer ${adminState.githubToken}`,
-        "Accept": "application/vnd.github.v3+json"
-      }
-    });
-
-    if (getRes.ok) {
-      const fileData = await getRes.json();
-      sha = fileData.sha;
-    }
-
-    const jsonContent = JSON.stringify(DB_BLOQUEOS, null, 2);
-    // Codificar a base64 UTF-8 compatible
-    const contentBase64 = btoa(unescape(encodeURIComponent(jsonContent)));
-
-    const putRes = await fetch(apiUrl, {
-      method: "PUT",
-      headers: {
-        "Authorization": `Bearer ${adminState.githubToken}`,
-        "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        message: "Actualización de horas bloqueadas - Barbería DMA",
-        content: contentBase64,
-        sha: sha || undefined
-      })
-    });
-
-    if (putRes.ok) {
-      const dataResp = await putRes.json();
-      DB_FILE_SHA = dataResp.content.sha;
-      if (statusEl) {
-        statusEl.textContent = "✅ ¡Guardado con éxito en GitHub!";
-        statusEl.className = "text-xs text-emerald-400 font-bold";
-      }
-      alert("✅ ¡Horas actualizadas y guardadas en GitHub! Los clientes ya verán esos huecos bloqueados.");
-    } else {
-      const errData = await putRes.json();
-      throw new Error(errData.message || "Error al subir a GitHub");
-    }
-  } catch (err) {
-    console.error("Error al guardar en GitHub:", err);
-    if (statusEl) {
-      statusEl.textContent = "⚠️ Guardado solo en este teléfono (Revisa el Token de GitHub)";
-      statusEl.className = "text-xs text-amber-400";
-    }
-    alert(`Nota: Los cambios quedan guardados en este dispositivo. Para sincronizarlo globalmente a todos los clientes, revisa tu Token de GitHub o sube el archivo data/bloqueos.json.`);
-  }
-}
-
-function copiarJsonParaGitHub() {
-  const jsonContent = JSON.stringify(DB_BLOQUEOS, null, 2);
-  navigator.clipboard.writeText(jsonContent).then(() => {
-    alert("📋 Contenido de bloqueos copiado al portapapeles. Puedes pegarlo en GitHub en el archivo data/bloqueos.json");
-  }).catch(() => {
-    prompt("Copia este texto y pégalo en data/bloqueos.json en GitHub:", jsonContent);
-  });
 }
 
 /* ============================================================

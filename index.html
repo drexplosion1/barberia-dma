@@ -440,6 +440,12 @@
                 <span>Confirmar Cita por WhatsApp</span>
               </button>
 
+              <!-- Mensaje de confirmación y reintento en móvil -->
+              <div id="booking-success-msg" class="hidden p-3 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-center space-y-1">
+                <p class="text-xs font-bold text-emerald-300">✅ ¡Turno reservado en la agenda!</p>
+                <p class="text-[11px] text-gray-300">¿No se abrió WhatsApp? <a id="link-reabrir-whatsapp" href="#" class="text-gold-400 font-bold underline">Toca aquí para abrirlo directamente</a></p>
+              </div>
+
               <a href="tel:+34610245360" class="w-full py-3.5 px-6 rounded-xl bg-brandDark-800 hover:bg-brandDark-700 text-white font-bold text-xs uppercase tracking-wider border border-gray-700 flex items-center justify-center gap-2.5 transition-colors shadow-md">
                 <svg class="w-4 h-4 text-gold-400" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 4V3z"></path></svg>
                 <span>O llamar directamente: 610 24 53 60</span>
@@ -929,7 +935,7 @@
           </div>
           <div>
             <label for="edit-cliente-servicio" class="block text-[11px] font-bold text-gray-300 mb-1">Servicio</label>
-            <select id="edit-cliente-servicio" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
+            <select id="edit-cliente-servicio" onchange="autoAjustarDuracionModal(this.value)" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
               <option value="Corte de Pelo Caballero">Corte Caballero (15€)</option>
               <option value="Arreglo de Barba con Toalla Caliente">Arreglo Barba (12€)</option>
               <option value="Combo VIP: Corte + Arreglo de Barba">Combo Corte + Barba (25€)</option>
@@ -937,6 +943,23 @@
               <option value="Corte de Pelo Niño">Corte Infantil (13€)</option>
               <option value="Lavado, Masaje Capilar & Peinado">Lavado & Peinado (8€)</option>
               <option value="Otro / Personalizado">Otro / Personalizado</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label for="edit-cliente-duracion" class="block text-[11px] font-bold text-gray-300 mb-1">Duración en la Agenda</label>
+            <select id="edit-cliente-duracion" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
+              <option value="1">1 turno (30 minutos)</option>
+              <option value="2">2 turnos (1 hora) - ej. Combo Corte + Barba</option>
+            </select>
+          </div>
+          <div>
+            <label for="edit-cliente-estado" class="block text-[11px] font-bold text-gray-300 mb-1">Estado de la Cita</label>
+            <select id="edit-cliente-estado" class="w-full bg-brandDark-950 border border-gray-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-gold-500">
+              <option value="confirmada">✅ Confirmada</option>
+              <option value="pendiente">🟡 Pendiente de confirmar</option>
             </select>
           </div>
         </div>
@@ -980,7 +1003,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/app.js?v=5.0"></script>
+  <script src="js/app.js?v=6.0"></script>
   <script>
     // Año actual automático
     const yr = document.getElementById("current-year");

@@ -34,6 +34,7 @@ const BARBERIA_CONFIG = {
       nombre: "Corte de Pelo Caballero",
       desc: "Degradado (Fade), corte clásico a tijera o estilo actual. Incluye asesoramiento y peinado con producto premium.",
       duracion: "30 min",
+      slots: 1,
       precio: "15€",
       popular: true
     },
@@ -42,6 +43,7 @@ const BARBERIA_CONFIG = {
       nombre: "Arreglo de Barba con Toalla Caliente",
       desc: "Perfilado a navaja tradicional, rebajado, hidratación con aceites y ritual relajante de toalla caliente.",
       duracion: "25 min",
+      slots: 1,
       precio: "12€",
       popular: false
     },
@@ -49,7 +51,8 @@ const BARBERIA_CONFIG = {
       id: "combo-corte-barba",
       nombre: "Combo VIP: Corte + Arreglo de Barba",
       desc: "El servicio estrella. Tu corte favorito junto al cuidado completo de barba con toalla caliente y loción revitalizante.",
-      duracion: "50 min",
+      duracion: "50 min (1 hora)",
+      slots: 2, // Requiere 2 turnos seguidos (1 hora)
       precio: "25€",
       popular: true
     },
@@ -58,6 +61,7 @@ const BARBERIA_CONFIG = {
       nombre: "Afeitado Clásico de Cabeza",
       desc: "Afeitado completo a navaja con espuma tibia, toallas calientes y tratamiento hidratante post-afeitado.",
       duracion: "30 min",
+      slots: 1,
       precio: "15€",
       popular: false
     },
@@ -66,6 +70,7 @@ const BARBERIA_CONFIG = {
       nombre: "Corte de Pelo Niño (Apto para niños)",
       desc: "Atención paciente, cercana y divertida para los más peques. Desde estilos clásicos hasta los más modernos.",
       duracion: "25 min",
+      slots: 1,
       precio: "13€",
       popular: false
     },
@@ -74,6 +79,7 @@ const BARBERIA_CONFIG = {
       nombre: "Lavado, Masaje Capilar & Peinado",
       desc: "Lavado relajante con champú específico, tónico refrescante y peinado con pomada o cera mate.",
       duracion: "15 min",
+      slots: 1,
       precio: "8€",
       popular: false
     }
@@ -380,6 +386,48 @@ function setServicioBooking(serviceId) {
   });
 
   actualizarResumenReserva();
+  if (reservaState.fecha) {
+    generarHuecosHorariosCliente(reservaState.fecha);
+  }
+}
+
+// Utilidades para cálculo de turnos y compatibilidad con WhatsApp en Safari/iOS
+function sumar30Minutos(horaStr) {
+  if (!horaStr || !horaStr.includes(":")) return "";
+  const [h, m] = horaStr.split(":").map(Number);
+  const totalMin = h * 60 + m + 30;
+  const nuevoH = Math.floor(totalMin / 60);
+  const nuevoM = totalMin % 60;
+  return `${String(nuevoH).padStart(2, '0')}:${String(nuevoM).padStart(2, '0')}`;
+}
+
+function obtenerSlotsConsecutivos(horaInicio, numSlots, slotsPermitidos) {
+  const slots = [horaInicio];
+  if (numSlots <= 1) return slots;
+  let actual = horaInicio;
+  for (let i = 1; i < numSlots; i++) {
+    const sig = sumar30Minutos(actual);
+    if (!slotsPermitidos.includes(sig)) {
+      return null; // La siguiente media hora no existe en el horario laboral del día (ej: comida o cierre)
+    }
+    slots.push(sig);
+    actual = sig;
+  }
+  return slots;
+}
+
+function abrirWhatsAppUniversal(url) {
+  // En iPhone (Safari) y Android, cambiar window.location.href abre directamente
+  // la app nativa de WhatsApp al 100% sin que el bloqueador de popups lo corte.
+  const esMovil = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (esMovil) {
+    window.location.href = url;
+  } else {
+    const w = window.open(url, '_blank');
+    if (!w || w.closed || typeof w.closed === 'undefined') {
+      window.location.href = url;
+    }
+  }
 }
 
 /* ============================================================
@@ -459,6 +507,9 @@ function generarHuecosHorariosCliente(fechaString) {
   const horaActual = ahora.getHours();
   const minActual = ahora.getMinutes();
 
+  // Duración requerida por el servicio seleccionado
+  const numSlots = (reservaState.servicioSeleccionado && reservaState.servicioSeleccionado.slots) || 1;
+
   let primerHuecoDisponible = null;
 
   container.innerHTML = slotsBase.map((s) => {
@@ -470,8 +521,6 @@ function generarHuecosHorariosCliente(fechaString) {
       }
     }
 
-    const estaBloqueada = bloqueadosDelDia.includes(s);
-
     if (esPasada) {
       return `
         <button type="button" disabled class="py-2 px-1 text-center rounded-lg border border-gray-800 text-[11px] text-gray-600 bg-[#0d0f14] cursor-not-allowed opacity-50" title="Hora ya pasada">
@@ -481,9 +530,25 @@ function generarHuecosHorariosCliente(fechaString) {
       `;
     }
 
-    if (estaBloqueada) {
+    // Comprobar si hay huecos consecutivos suficientes para la duración del servicio
+    const slotsRequeridos = obtenerSlotsConsecutivos(s, numSlots, slotsBase);
+
+    if (!slotsRequeridos) {
+      // Por ejemplo, no hay 1 hora completa a las 13:00 antes de comer o a las 19:30 antes de cerrar
       return `
-        <button type="button" disabled class="py-2 px-1 text-center rounded-lg border border-red-500/20 text-[11px] text-red-400/60 bg-red-950/20 cursor-not-allowed line-through" title="Hora ocupada por otro cliente">
+        <button type="button" disabled class="py-2 px-1 text-center rounded-lg border border-gray-800/80 text-[11px] text-gray-500 bg-[#0d0f14] cursor-not-allowed opacity-60" title="No hay tiempo suficiente para un servicio de ${numSlots * 30} min antes del cierre o descanso">
+          <span>${s}</span>
+          <span class="block text-[8px] text-gray-500">Sin tiempo</span>
+        </button>
+      `;
+    }
+
+    // Comprobar si alguno de los slots requeridos está bloqueado
+    const hayBloqueo = slotsRequeridos.some(slot => bloqueadosDelDia.includes(slot));
+
+    if (hayBloqueo) {
+      return `
+        <button type="button" disabled class="py-2 px-1 text-center rounded-lg border border-red-500/20 text-[11px] text-red-400/60 bg-red-950/20 cursor-not-allowed line-through" title="Hueco ocupado por otro cliente">
           <span>${s}</span>
           <span class="block text-[8px] text-red-400/80 uppercase font-semibold">Ocupado</span>
         </button>
@@ -495,7 +560,7 @@ function generarHuecosHorariosCliente(fechaString) {
     return `
       <button type="button" onclick="setSlotHora('${s}')" class="time-slot-btn py-2 px-1 text-center rounded-lg border border-gray-700/80 text-xs text-gray-200 hover:border-amber-400 hover:text-white bg-[#151922] transition-colors" data-slot="${s}">
         <span>${s}</span>
-        <span class="block text-[8px] text-emerald-400 font-semibold">Libre</span>
+        <span class="block text-[8px] text-emerald-400 font-semibold">${numSlots === 2 ? 'Libre (1h)' : 'Libre'}</span>
       </button>
     `;
   }).join("");
@@ -558,6 +623,8 @@ function actualizarResumenReserva() {
   const fechaEl = document.getElementById("summary-date");
   const precioEl = document.getElementById("summary-price");
 
+  const numSlots = (reservaState.servicioSeleccionado && reservaState.servicioSeleccionado.slots) || 1;
+
   if (servEl && reservaState.servicioSeleccionado) {
     servEl.textContent = `${reservaState.servicioSeleccionado.nombre} (${reservaState.servicioSeleccionado.duracion})`;
   }
@@ -568,7 +635,13 @@ function actualizarResumenReserva() {
       const fObj = new Date(partes[0], partes[1] - 1, partes[2]);
       const opciones = { weekday: 'short', day: 'numeric', month: 'short' };
       const fechaFormateada = fObj.toLocaleDateString('es-ES', opciones);
-      fechaEl.textContent = `${fechaFormateada} a las ${reservaState.hora}`;
+
+      if (numSlots === 2) {
+        const horaFin = sumar30Minutos(sumar30Minutos(reservaState.hora));
+        fechaEl.textContent = `${fechaFormateada} de ${reservaState.hora} a ${horaFin} h (1 hora)`;
+      } else {
+        fechaEl.textContent = `${fechaFormateada} a las ${reservaState.hora} h`;
+      }
     } else if (reservaState.fecha) {
       fechaEl.textContent = `${reservaState.fecha} (Elige turno libre)`;
     } else {
@@ -581,7 +654,7 @@ function actualizarResumenReserva() {
   }
 }
 
-async function confirmarReservaWhatsApp() {
+function confirmarReservaWhatsApp() {
   if (!reservaState.servicioSeleccionado) return alert("Por favor selecciona un servicio.");
   if (!reservaState.fecha || !reservaState.hora) return alert("Por favor selecciona la fecha y una hora libre disponible.");
   if (!reservaState.nombre) {
@@ -595,11 +668,21 @@ async function confirmarReservaWhatsApp() {
   const opciones = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   const fechaCompleta = fObj.toLocaleDateString('es-ES', opciones);
 
-  // 1. Guardar automáticamente la cita en memoria y Firebase
+  // Calcular turnos necesarios (1 slot = 30min, 2 slots = 1 hora)
+  const numSlots = (reservaState.servicioSeleccionado && reservaState.servicioSeleccionado.slots) || 1;
+  const slotsABloquear = (numSlots === 2)
+    ? [reservaState.hora, sumar30Minutos(reservaState.hora)]
+    : [reservaState.hora];
+  const horaFin = (numSlots === 2) ? sumar30Minutos(sumar30Minutos(reservaState.hora)) : "";
+
+  // 1. Guardar la cita principal en memoria local
   const docId = `${reservaState.fecha}_${reservaState.hora.replace(':', '')}`;
   const citaCliente = {
     fecha: reservaState.fecha,
     hora: reservaState.hora,
+    horaFin: horaFin,
+    slots: slotsABloquear,
+    duracionSlots: numSlots,
     nombre: reservaState.nombre.trim(),
     telefono: (reservaState.telefono || "").trim(),
     servicio: reservaState.servicioSeleccionado.nombre,
@@ -610,34 +693,70 @@ async function confirmarReservaWhatsApp() {
     creadoEn: new Date().toISOString()
   };
 
-  // Guardar en array local
   const cIdx = DB_CITAS.findIndex(c => c.id === docId || (c.fecha === citaCliente.fecha && c.hora === citaCliente.hora));
   if (cIdx > -1) {
     DB_CITAS[cIdx] = { id: docId, ...citaCliente };
   } else {
     DB_CITAS.push({ id: docId, ...citaCliente });
   }
+
+  // Si son 2 slots (ej. Combo VIP 50min), crear entrada enlazada para el segundo turno
+  if (numSlots === 2 && slotsABloquear[1]) {
+    const slot2 = slotsABloquear[1];
+    const docId2 = `${reservaState.fecha}_${slot2.replace(':', '')}`;
+    const cita2 = {
+      fecha: reservaState.fecha,
+      hora: slot2,
+      esContinuacionDe: reservaState.hora,
+      slots: slotsABloquear,
+      nombre: `${reservaState.nombre.trim()} (Combo VIP)`,
+      telefono: (reservaState.telefono || "").trim(),
+      servicio: `${reservaState.servicioSeleccionado.nombre} (2ª parte)`,
+      precio: "",
+      notas: `Continuación de turno de las ${reservaState.hora}`,
+      estado: "pendiente",
+      origen: "whatsapp_web",
+      creadoEn: new Date().toISOString()
+    };
+    const cIdx2 = DB_CITAS.findIndex(c => c.id === docId2 || (c.fecha === cita2.fecha && c.hora === cita2.hora));
+    if (cIdx2 > -1) DB_CITAS[cIdx2] = { id: docId2, ...cita2 };
+    else DB_CITAS.push({ id: docId2, ...cita2 });
+  }
+
   localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
 
-  // Bloquear turno
+  // Bloquear turnos en cache
   if (!DB_BLOQUEOS.bloqueos[reservaState.fecha]) {
     DB_BLOQUEOS.bloqueos[reservaState.fecha] = [];
   }
-  if (!DB_BLOQUEOS.bloqueos[reservaState.fecha].includes(reservaState.hora)) {
-    DB_BLOQUEOS.bloqueos[reservaState.fecha].push(reservaState.hora);
-  }
+  slotsABloquear.forEach(s => {
+    if (!DB_BLOQUEOS.bloqueos[reservaState.fecha].includes(s)) {
+      DB_BLOQUEOS.bloqueos[reservaState.fecha].push(s);
+    }
+  });
   localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
 
-  // Guardar en Firestore en tiempo real
+  // 2. Guardar en Firestore de fondo (SIN AWAIT para no matar el gesto del usuario en Safari iOS)
   if (firebaseDb) {
-    try {
-      await firebaseDb.collection("citas").doc(docId).set(citaCliente);
-      await firebaseDb.collection("bloqueos").doc(reservaState.fecha).set({
-        horas: DB_BLOQUEOS.bloqueos[reservaState.fecha]
-      });
-    } catch (err) {
-      console.warn("Aviso al guardar cita cliente en Firestore:", err);
+    firebaseDb.collection("citas").doc(docId).set(citaCliente).catch(e => console.warn(e));
+    if (numSlots === 2 && slotsABloquear[1]) {
+      const docId2 = `${reservaState.fecha}_${slotsABloquear[1].replace(':', '')}`;
+      firebaseDb.collection("citas").doc(docId2).set({
+        fecha: reservaState.fecha,
+        hora: slotsABloquear[1],
+        esContinuacionDe: reservaState.hora,
+        slots: slotsABloquear,
+        nombre: `${reservaState.nombre.trim()} (Combo VIP)`,
+        telefono: (reservaState.telefono || "").trim(),
+        servicio: `${reservaState.servicioSeleccionado.nombre} (2ª parte)`,
+        estado: "pendiente",
+        origen: "whatsapp_web",
+        creadoEn: new Date().toISOString()
+      }).catch(e => console.warn(e));
     }
+    firebaseDb.collection("bloqueos").doc(reservaState.fecha).set({
+      horas: DB_BLOQUEOS.bloqueos[reservaState.fecha]
+    }).catch(e => console.warn(e));
   }
 
   // Refrescar los turnos para que no se pueda volver a pedir
@@ -647,14 +766,26 @@ async function confirmarReservaWhatsApp() {
   mensaje += `👋 ¡Hola! Me gustaría reservar cita:\n\n`;
   mensaje += `✂️ *Servicio:* ${reservaState.servicioSeleccionado.nombre} (${reservaState.servicioSeleccionado.precio})\n`;
   mensaje += `📅 *Fecha:* ${fechaCompleta}\n`;
-  mensaje += `⏰ *Hora:* ${reservaState.hora}\n`;
+  if (numSlots === 2) {
+    mensaje += `⏰ *Hora:* ${reservaState.hora} h a ${horaFin} h (Duración aprox: 50-60 min / 2 turnos)\n`;
+  } else {
+    mensaje += `⏰ *Hora:* ${reservaState.hora} h\n`;
+  }
   mensaje += `👤 *Nombre:* ${reservaState.nombre}\n`;
   if (reservaState.telefono) mensaje += `📞 *Teléfono:* ${reservaState.telefono}\n`;
   if (reservaState.notas) mensaje += `💬 *Notas:* ${reservaState.notas}\n`;
   mensaje += `\n¿Me confirmáis que os viene bien? ¡Muchas gracias!`;
 
-  const whatsappUrl = `https://wa.me/${BARBERIA_CONFIG.telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
-  window.open(whatsappUrl, '_blank');
+  const whatsappUrl = `https://api.whatsapp.com/send?phone=${BARBERIA_CONFIG.telefonoLimpio}&text=${encodeURIComponent(mensaje)}`;
+
+  // Mostrar mensaje y enlace de respaldo por si Safari bloquea la redirección
+  const msgBox = document.getElementById("booking-success-msg");
+  const linkReabrir = document.getElementById("link-reabrir-whatsapp");
+  if (msgBox) msgBox.classList.remove("hidden");
+  if (linkReabrir) linkReabrir.href = whatsappUrl;
+
+  // Abrir WhatsApp en iOS Safari y Android de forma nativa
+  abrirWhatsAppUniversal(whatsappUrl);
 }
 
 /* ============================================================
@@ -910,11 +1041,13 @@ function renderizarHorariosAdmin() {
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-black text-sm text-white truncate">${isBlocked ? nombreCliente : '<span class="text-gray-500 font-normal">Hueco libre</span>'}</span>
                 ${badgeHtml}
+                ${cita && cita.duracionSlots === 2 ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gold-500/20 text-gold-300 border border-gold-500/30">1 hora</span>` : ''}
               </div>
               
               ${isBlocked && cita ? `
                 <div class="text-[11px] text-gray-400 flex items-center gap-2 mt-1 flex-wrap">
                   ${cita.servicio ? `<span class="text-gold-400/90 font-medium">✂️ ${cita.servicio}</span>` : ''}
+                  ${cita.horaFin ? `<span class="text-gray-300 font-mono">⏰ hasta ${cita.horaFin}</span>` : ''}
                   ${cita.telefono ? `<span>📞 ${cita.telefono}</span>` : ''}
                   ${cita.notas ? `<span class="text-gray-400 italic">💬 "${cita.notas}"</span>` : ''}
                 </div>
@@ -923,7 +1056,7 @@ function renderizarHorariosAdmin() {
           </div>
 
           <div class="flex items-center gap-1.5 flex-shrink-0">
-            ${isBlocked && cita && cita.telefono ? `
+            ${isBlocked && cita && cita.telefono && !cita.esContinuacionDe ? `
               ${estado === 'pendiente' ? `
                 <button type="button" onclick="event.stopPropagation(); confirmarCitaPorWhatsAppRapido('${fecha}', '${s}')" title="Confirmar por WhatsApp al cliente" class="hidden sm:inline-flex px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] items-center gap-1 shadow-md shadow-emerald-950/50 transition-all">
                   <span>✅</span> <span>Confirmar</span>
@@ -949,6 +1082,16 @@ function renderizarHorariosAdmin() {
 /* ============================================================
    6. SUBMODAL: ASIGNAR / EDITAR CLIENTE Y NOTAS
    ============================================================ */
+window.autoAjustarDuracionModal = function(servicio) {
+  const durSelect = document.getElementById("edit-cliente-duracion");
+  if (!durSelect) return;
+  if (servicio && servicio.toLowerCase().includes("combo")) {
+    durSelect.value = "2";
+  } else {
+    durSelect.value = "1";
+  }
+};
+
 function initEditorCitaModal() {
   const form = document.getElementById("form-guardar-cita-admin");
   if (!form) return;
@@ -963,18 +1106,25 @@ function initEditorCitaModal() {
     const telefono = document.getElementById("edit-cliente-tel").value.trim();
     const servicio = document.getElementById("edit-cliente-servicio").value;
     const notas = document.getElementById("edit-cliente-notas").value.trim();
+    const duracionSlots = parseInt(document.getElementById("edit-cliente-duracion").value) || 1;
+    const estado = document.getElementById("edit-cliente-estado").value || "confirmada";
 
-    const citaExistente = DB_CITAS.find(c => (c.fecha === fecha && c.hora === hora));
-    const estadoActual = (citaExistente && citaExistente.estado) ? citaExistente.estado : "confirmada";
+    const slotsABloquear = (duracionSlots === 2)
+      ? [hora, sumar30Minutos(hora)]
+      : [hora];
+    const horaFin = (duracionSlots === 2) ? sumar30Minutos(sumar30Minutos(hora)) : "";
 
     const citaObj = {
       fecha: fecha,
       hora: hora,
+      horaFin: horaFin,
+      slots: slotsABloquear,
+      duracionSlots: duracionSlots,
       nombre: nombre,
       telefono: telefono,
       servicio: servicio,
       notas: notas,
-      estado: estadoActual,
+      estado: estado,
       actualizadoEn: new Date().toISOString()
     };
 
@@ -986,19 +1136,57 @@ function initEditorCitaModal() {
     } else {
       DB_CITAS.push({ id: docId, ...citaObj });
     }
+
+    // Si son 2 turnos, guardar también la extensión
+    if (duracionSlots === 2 && slotsABloquear[1]) {
+      const slot2 = slotsABloquear[1];
+      const docId2 = `${fecha}_${slot2.replace(':', '')}`;
+      const cita2 = {
+        fecha: fecha,
+        hora: slot2,
+        esContinuacionDe: hora,
+        slots: slotsABloquear,
+        nombre: `${nombre} (Extensión)`,
+        telefono: telefono,
+        servicio: `${servicio} (2ª parte)`,
+        notas: `Continuación de cita de las ${hora}`,
+        estado: estado,
+        actualizadoEn: new Date().toISOString()
+      };
+      const idx2 = DB_CITAS.findIndex(c => c.id === docId2 || (c.fecha === fecha && c.hora === slot2));
+      if (idx2 > -1) DB_CITAS[idx2] = { id: docId2, ...cita2 };
+      else DB_CITAS.push({ id: docId2, ...cita2 });
+    }
+
     localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
 
-    // 2. Bloquear turno
+    // 2. Bloquear turnos
     if (!DB_BLOQUEOS.bloqueos[fecha]) DB_BLOQUEOS.bloqueos[fecha] = [];
-    if (!DB_BLOQUEOS.bloqueos[fecha].includes(hora)) {
-      DB_BLOQUEOS.bloqueos[fecha].push(hora);
-    }
+    slotsABloquear.forEach(s => {
+      if (!DB_BLOQUEOS.bloqueos[fecha].includes(s)) {
+        DB_BLOQUEOS.bloqueos[fecha].push(s);
+      }
+    });
     localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
 
     // 3. Sincronizar con Firebase Firestore
     if (firebaseDb) {
       try {
         await firebaseDb.collection("citas").doc(docId).set(citaObj);
+        if (duracionSlots === 2 && slotsABloquear[1]) {
+          const docId2 = `${fecha}_${slotsABloquear[1].replace(':', '')}`;
+          await firebaseDb.collection("citas").doc(docId2).set({
+            fecha: fecha,
+            hora: slotsABloquear[1],
+            esContinuacionDe: hora,
+            slots: slotsABloquear,
+            nombre: `${nombre} (Extensión)`,
+            telefono: telefono,
+            servicio: `${servicio} (2ª parte)`,
+            estado: estado,
+            actualizadoEn: new Date().toISOString()
+          });
+        }
         await firebaseDb.collection("bloqueos").doc(fecha).set({
           horas: DB_BLOQUEOS.bloqueos[fecha]
         });
@@ -1023,6 +1211,8 @@ window.abrirEditorCita = function(fecha, hora) {
   const nombreInput = document.getElementById("edit-cliente-nombre");
   const telInput = document.getElementById("edit-cliente-tel");
   const servSelect = document.getElementById("edit-cliente-servicio");
+  const durSelect = document.getElementById("edit-cliente-duracion");
+  const estadoSelect = document.getElementById("edit-cliente-estado");
   const notasInput = document.getElementById("edit-cliente-notas");
   const contactActions = document.getElementById("edit-contact-actions");
   const btnCall = document.getElementById("btn-call-client");
@@ -1053,6 +1243,12 @@ window.abrirEditorCita = function(fecha, hora) {
   nombreInput.value = (cita && cita.nombre) ? cita.nombre : "";
   telInput.value = (cita && cita.telefono) ? cita.telefono : "";
   if (servSelect && cita && cita.servicio) servSelect.value = cita.servicio;
+  if (durSelect) {
+    durSelect.value = (cita && cita.duracionSlots === 2) || (cita && cita.servicio && cita.servicio.includes("Combo")) ? "2" : "1";
+  }
+  if (estadoSelect) {
+    estadoSelect.value = (cita && cita.estado) ? cita.estado : "confirmada";
+  }
   notasInput.value = (cita && cita.notas) ? cita.notas : "";
 
   // Botones de llamada / whatsapp directa si hay teléfono
@@ -1061,7 +1257,7 @@ window.abrirEditorCita = function(fecha, hora) {
     let telLimpio = cita.telefono.replace(/\s+/g, '').replace('+', '');
     if (!telLimpio.startsWith('34') && telLimpio.length === 9) telLimpio = '34' + telLimpio;
     btnCall.href = `tel:+${telLimpio}`;
-    btnWhatsApp.href = `https://wa.me/${telLimpio}?text=Hola%20${encodeURIComponent(cita.nombre || '')},%20te%20escribimos%20de%20Barber%C3%ADa%20DMA`;
+    btnWhatsApp.href = `https://api.whatsapp.com/send?phone=${telLimpio}&text=Hola%20${encodeURIComponent(cita.nombre || '')},%20te%20escribimos%20de%20Barber%C3%ADa%20DMA`;
   } else {
     contactActions.classList.add("hidden");
   }
@@ -1083,11 +1279,24 @@ window.confirmarCitaPorWhatsAppRapido = async function(fecha, hora) {
 
   // Actualizar estado a confirmada
   cita.estado = "confirmada";
+  
+  // Si la cita tiene slots enlazados, confirmar también el segundo turno
+  if (cita.slots && Array.isArray(cita.slots)) {
+    cita.slots.forEach(s => {
+      const c = DB_CITAS.find(x => x.fecha === fecha && x.hora === s);
+      if (c) c.estado = "confirmada";
+    });
+  }
+
   localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
   if (firebaseDb) {
     const docId = `${fecha}_${hora.replace(':', '')}`;
     try {
       await firebaseDb.collection("citas").doc(docId).set(cita, { merge: true });
+      if (cita.slots && cita.slots[1]) {
+        const docId2 = `${fecha}_${cita.slots[1].replace(':', '')}`;
+        await firebaseDb.collection("citas").doc(docId2).set({ estado: "confirmada" }, { merge: true });
+      }
     } catch (e) {
       console.warn("Aviso Firestore al confirmar:", e);
     }
@@ -1101,7 +1310,7 @@ window.confirmarCitaPorWhatsAppRapido = async function(fecha, hora) {
   if (!tel.startsWith('34') && tel.length === 9) tel = '34' + tel;
 
   const msj = `💈 *BARBERÍA DMA - CITA CONFIRMADA*\n\n👋 ¡Hola ${cita.nombre}!\nTu cita queda confirmada para el *${fechaTxt}* a las *${hora} h*.\n✂️ Servicio: ${cita.servicio || 'Corte'}.\n📍 C. Ignacio Herrero Garralda, 1, Oviedo.\n\n¡Te esperamos!`;
-  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msj)}`, '_blank');
+  abrirWhatsAppUniversal(`https://api.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msj)}`);
   renderizarHorariosAdmin();
 };
 
@@ -1117,7 +1326,7 @@ window.recordarCitaPorWhatsAppRapido = function(fecha, hora) {
   if (!tel.startsWith('34') && tel.length === 9) tel = '34' + tel;
 
   const msj = `💈 *BARBERÍA DMA - RECORDATORIO*\n\n👋 ¡Hola ${cita.nombre}!\nTe recordamos tu cita para *${fechaTxt}* a las *${hora} h* en Barbería DMA.\n📍 C. Ignacio Herrero Garralda, 1, Oviedo.\n\nSi necesitas modificarla o surge cualquier imprevisto, avísanos por aquí. ¡Nos vemos pronto!`;
-  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msj)}`, '_blank');
+  abrirWhatsAppUniversal(`https://api.whatsapp.com/send?phone=${tel}&text=${encodeURIComponent(msj)}`);
 };
 
 window.confirmarCitaPorWhatsAppModal = function() {
@@ -1138,18 +1347,33 @@ window.liberarTurnoActualAdmin = async function() {
 
   if (!confirm(`¿Quieres liberar el turno de las ${hora} del ${fecha}? Volverá a estar disponible para los clientes.`)) return;
 
+  const docId = `${fecha}_${hora.replace(':', '')}`;
+  const cita = DB_CITAS.find(c => c.id === docId || (c.fecha === fecha && c.hora === hora));
+
+  // Si la cita tenía 2 slots o es continuación, liberar ambos
+  let slotsALiberar = [hora];
+  if (cita && cita.slots && Array.isArray(cita.slots)) {
+    slotsALiberar = cita.slots;
+  } else if (cita && cita.esContinuacionDe) {
+    slotsALiberar = [cita.esContinuacionDe, hora];
+  }
+
   // 1. Quitar de bloqueos
   if (DB_BLOQUEOS.bloqueos[fecha]) {
-    const idx = DB_BLOQUEOS.bloqueos[fecha].indexOf(hora);
-    if (idx > -1) DB_BLOQUEOS.bloqueos[fecha].splice(idx, 1);
+    slotsALiberar.forEach(s => {
+      const idx = DB_BLOQUEOS.bloqueos[fecha].indexOf(s);
+      if (idx > -1) DB_BLOQUEOS.bloqueos[fecha].splice(idx, 1);
+    });
     if (DB_BLOQUEOS.bloqueos[fecha].length === 0) delete DB_BLOQUEOS.bloqueos[fecha];
   }
   localStorage.setItem("dma_bloqueos_cache", JSON.stringify(DB_BLOQUEOS));
 
-  // 2. Borrar cita
-  const docId = `${fecha}_${hora.replace(':', '')}`;
-  const cIdx = DB_CITAS.findIndex(c => c.id === docId || (c.fecha === fecha && c.hora === hora));
-  if (cIdx > -1) DB_CITAS.splice(cIdx, 1);
+  // 2. Borrar citas
+  slotsALiberar.forEach(s => {
+    const sDocId = `${fecha}_${s.replace(':', '')}`;
+    const cIdx = DB_CITAS.findIndex(c => c.id === sDocId || (c.fecha === fecha && c.hora === s));
+    if (cIdx > -1) DB_CITAS.splice(cIdx, 1);
+  });
   localStorage.setItem("dma_citas_cache", JSON.stringify(DB_CITAS));
 
   // 3. Firestore
@@ -1158,7 +1382,10 @@ window.liberarTurnoActualAdmin = async function() {
       await firebaseDb.collection("bloqueos").doc(fecha).set({
         horas: DB_BLOQUEOS.bloqueos[fecha] || []
       });
-      await firebaseDb.collection("citas").doc(docId).delete();
+      for (const s of slotsALiberar) {
+        const sDocId = `${fecha}_${s.replace(':', '')}`;
+        await firebaseDb.collection("citas").doc(sDocId).delete();
+      }
     } catch (err) {
       console.warn("Aviso Firestore al liberar:", err);
     }
@@ -1180,8 +1407,8 @@ window.buscarCitasAdmin = function() {
 
   const query = input ? input.value.trim().toLowerCase() : "";
 
-  // Filtrar citas
-  let filtradas = DB_CITAS.slice();
+  // Filtrar citas (mostrando solo citas principales para no duplicar extensiones de 1 hora)
+  let filtradas = DB_CITAS.filter(c => !c.esContinuacionDe);
 
   if (query.length > 0) {
     filtradas = filtradas.filter(c => {
